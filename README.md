@@ -1,5 +1,3 @@
-<a id="top"></a>
-
 <div align="center">
 
 <img src="public/og-banner.svg" alt="SoundScript banner" width="100%">
@@ -11,9 +9,9 @@
 
 [**🇬🇧 English**](#english) · [**🇮🇹 Italiano**](#italiano)
 
-[Live app](https://soundscript-app.pages.dev/) · [Releases](../../releases) · [Issues](../../issues)
+[Live app](https://soundscript-app.pages.dev/) · [Landing page](https://soundscript-home.pages.dev/) · [Releases](../../releases) · [Issues](../../issues)
 
-![PWA](https://img.shields.io/badge/PWA-installable-4f46e5) ![Serverless](https://img.shields.io/badge/backend-none%20·%20serverless-success) ![License](https://img.shields.io/badge/license-personal%20project-lightgrey)
+![PWA](https://img.shields.io/badge/PWA-installable-4f46e5) ![Serverless](https://img.shields.io/badge/backend-none%20·%20serverless-success) ![Hosted on](https://img.shields.io/badge/hosted%20on-Cloudflare%20Pages-f38020)
 
 </div>
 
@@ -23,7 +21,7 @@
 ## 🇬🇧 English
 
 > [!TIP]
-> **Try it now:** [https://soundscript-app.pages.dev](https://soundscript-app.pages.dev/) — no signup, no server, no data leaving your device except the API calls you configure yourself.
+> **Try it now:** [soundscript-app.pages.dev](https://soundscript-app.pages.dev/) — no signup, no server, no data leaving your device except the API calls you configure yourself.
 
 ### What is SoundScript?
 
@@ -41,11 +39,12 @@ SoundScript is a **privacy-first Progressive Web App** that transcribes voice me
 - 🧠 **On-device fallback** — Whisper (tiny/base) + Qwen2.5 run locally via WebGPU/WASM; fully offline once downloaded.
 - 📝 **Custom TL;DR** — length, style (narrative / bullets / actions & deadlines / formal / friendly), language, custom instructions, saved presets; auto-generated for audio over 60 s.
 - ▶️ **Built-in audio player** — play/pause, ±10 s, draggable seek, playback speed 0.75×–2×.
-- 🗂️ **History** — auto-saved (last 20), full-text & date search, per-entry delete, clear-all, JSON export.
+- 🗂️ **History** — auto-saved (last 20), full-text & date search, per-entry delete, clear-all, JSON / Markdown / TXT export and JSON import with dedupe.
+- 🛡️ **Settings backup** — export/import with two modes: safe (no API keys) and full (with keys, explicit warning).
 - 📤 **Export** — TXT, Markdown, and PDF (via a branded print sheet).
 - 📲 **Share target** — share audio straight from WhatsApp on Android & desktop; on iOS use the Files workaround (see in-app FAQ).
-- 📱 **Full PWA** — installable with icons, screenshots and home-screen shortcuts ("New transcription", "History"), offline support, silent background updates.
-- 🛟 **QoL** — draft recovery after accidental reloads, paste-audio-from-clipboard, cancel button, API-key tester, manual theme (auto/light/dark), end-of-processing vibration/notifications, status badges.
+- 📱 **Full PWA** — installable with icons, screenshots and home-screen shortcuts, offline support, silent background updates.
+- 🛟 **QoL** — draft recovery after accidental reloads, paste-audio-from-clipboard, cancel button, API-key tester, manual theme, end-of-processing vibration/notifications, status badges.
 - ♿ **Accessible** — visible focus rings, screen-reader live announcements, AA contrast, reduced-motion support.
 
 ### How it works
@@ -69,10 +68,21 @@ SoundScript is a **privacy-first Progressive Web App** that transcribes voice me
 
 ### Privacy & data
 
-- **No backend, no database, no analytics.** The site is static GitHub Pages.
+- **No backend, no database, no analytics.** The app is a static site; this repository is public so anyone can verify there is no telemetry.
 - API keys, settings and history live **only in your browser** (localStorage/sessionStorage).
-- Audio files are kept **in memory for the current session only** (player); they are never stored in history.
+- Audio files are kept **in memory for the current session only**; they are never stored in history.
 - Exports and printing happen **entirely client-side**.
+
+### Hosting & distribution
+
+| What | Where |
+|---|---|
+| Live app (only official host) | `https://soundscript-app.pages.dev` — Cloudflare Pages |
+| Landing page | `https://soundscript-home.pages.dev` — Cloudflare Pages |
+| Source of truth | this public GitHub repository |
+| GitHub Pages | intentionally **disabled** |
+
+Cloudflare builds from this repo on every push to `main`. Security headers (HSTS, X-Frame-Options, Permissions-Policy, cache rules) are served via `public/_headers`.
 
 ### Install as an app
 
@@ -87,29 +97,33 @@ SoundScript is a **privacy-first Progressive Web App** that transcribes voice me
 **Stack:** Vite · vanilla ES modules · [@huggingface/transformers](https://github.com/huggingface/transformers.js) · hand-rolled service worker.
 
     SoundScript/
-    ├─ .github/workflows/deploy.yml   # Pages deploy + PNG asset generation (rsvg-convert)
-    ├─ index.html                     # meta OG/Twitter, self-hosted font preload
+    ├─ index.html                  # meta OG/Twitter, self-hosted font preload
+    ├─ vite.config.js              # base "./", SW build stamp, app version
+    ├─ package.json
     ├─ public/
-    │  ├─ manifest.json               # icons, shortcuts, screenshots, share_target
-    │  ├─ sw.js                       # offline cache, share-target POST handler
+    │  ├─ manifest.json            # icons, shortcuts, screenshots, share_target
+    │  ├─ sw.js                    # offline cache, share-target POST handler
     │  ├─ share-target.html
-    │  ├─ fonts/roboto-flex.woff2     # self-hosted variable font
-    │  ├─ screenshots/                # real store screenshots (replace placeholders)
-    │  └─ *.svg                       # icons, logos, OG banner, placeholders
+    │  ├─ _headers                 # Cloudflare security & cache headers
+    │  ├─ robots.txt, sitemap.xml
+    │  ├─ icons/                   # pre-rasterized PNGs (192/512/maskable/apple/OG/shortcuts)
+    │  ├─ fonts/roboto-flex.woff2  # self-hosted variable font
+    │  ├─ screenshots/             # real store screenshots
+    │  └─ *.svg                    # logos, icon sources, OG banner
     └─ src/
-       ├─ main.js                     # UI, chain orchestration, player, history, exports
-       ├─ providers.js                # API adapters (OpenAI/Groq/Google/Mistral/Anthropic)
-       └─ style.css                   # design system, themes, print sheet
+       ├─ main.js                  # UI, chain orchestration, player, history, exports
+       ├─ providers.js             # API adapters (OpenAI/Groq/Google/Mistral/Anthropic)
+       └─ style.css                # design system, themes, print sheet
 
     npm install
     npm run dev      # local dev server
-    npm run build    # outputs dist/
+    npm run build    # outputs dist/ (what Cloudflare publishes)
 
-Deploy: push to `main` → GitHub Actions builds, rasterizes SVG assets (icons, OG banner, shortcut icons; screenshot placeholders only if real PNGs are missing) and publishes to Pages.
+Deploy: push to `main` → Cloudflare Pages (project `soundscript-app`) builds and publishes automatically. No GitHub Actions involved.
 
 ### Performance & quality highlights
 
-- Core bundle ~24 KB gzip-critical path; the ML library is a **separate chunk loaded on demand**.
+- Core bundle light; the ML library is a **separate chunk loaded on demand**.
 - Self-hosted variable font with `preload` + `font-display: optional` → **zero layout shift**.
 - Service worker: network-first navigations, cache-first assets, silent self-update.
 - Lighthouse-optimized: AA contrast, focus management, live regions, semantic markup.
@@ -134,7 +148,7 @@ Personal project — all rights reserved unless a LICENSE file states otherwise.
 ## 🇮🇹 Italiano
 
 > [!TIP]
-> **Provala subito:** [https://soundscript-app.pages.dev](https://soundscript-app.pages.dev/) — niente registrazione, niente server, niente dati che lasciano il dispositivo tranne le chiamate API che configuri tu.
+> **Provala subito:** [soundscript-app.pages.dev](https://soundscript-app.pages.dev/) — niente registrazione, niente server, niente dati che lasciano il dispositivo tranne le chiamate API che configuri tu.
 
 ### Cos'è SoundScript?
 
@@ -148,15 +162,16 @@ SoundScript è una **Progressive Web App privacy-first** che trascrive i messagg
 
 ### Funzionalità
 
-- 🎙️ **Catena di trascrizione** — OpenAI, Groq, Google Gemini, Mistral, endpoint personalizzati compatibili OpenAI; Anthropic per i riassunti. Retry automatici, fallback sul modello suggerito, memoria degli errori per chiave.
-- 🧠 **Fallback on-device** — Whisper (tiny/base) + Qwen2.5 girano in locale via WebGPU/WASM; offline completo dopo il primo download.
-- 📝 **TL;DR su misura** — lunghezza, stile (narrativo / elenco / azioni e scadenze / formale / amichevole), lingua, istruzioni personalizzate, preset salvati; automatico sopra i 60 s.
+- 🎙️ **Catena di trascrizione** — OpenAI, Groq, Google Gemini, Mistral, endpoint custom compatibili OpenAI; Anthropic per i riassunti. Retry automatici, fallback sul modello suggerito, memoria errori per chiave.
+- 🧠 **Fallback on-device** — Whisper (tiny/base) + Qwen2.5 in locale via WebGPU/WASM; offline completo dopo il primo download.
+- 📝 **TL;DR su misura** — lunghezza, stile (narrativo / elenco / azioni e scadenze / formale / amichevole), lingua, istruzioni custom, preset salvati; automatico sopra i 60 s.
 - ▶️ **Player integrato** — play/pausa, ±10 s, seek trascinabile, velocità 0,75×–2×.
-- 🗂️ **Cronologia** — salvataggio automatico (ultime 20 voci), ricerca su testo e data, eliminazione singola, svuotamento, export JSON.
+- 🗂️ **Cronologia** — salvataggio automatico (ultime 20), ricerca su testo e data, eliminazione singola, svuotamento, export JSON / Markdown / TXT e import JSON con deduplica.
+- 🛡️ **Backup impostazioni** — export/import con due modalità: sicuro (senza chiavi API) e completo (con chiavi, avviso esplicito).
 - 📤 **Export** — TXT, Markdown e PDF (foglio di stampa brandizzato).
 - 📲 **Share target** — condividi l'audio da WhatsApp su Android e desktop; su iOS c'è il percorso Files (vedi FAQ in app).
-- 📱 **PWA completa** — installabile con icone, screenshot e scorciatoie home ("Nuova trascrizione", "Cronologia"), offline, aggiornamenti silenziosi.
-- 🛟 **Qualità della vita** — recupero bozza dopo reload accidentale, incolla audio dagli appunti, pulsante Annulla, test chiave API, tema manuale (auto/chiaro/scuro), vibrazione/notifiche a fine elaborazione, badge di stato.
+- 📱 **PWA completa** — installabile con icone, screenshot e scorciatoie home, offline, aggiornamenti silenziosi.
+- 🛟 **Qualità della vita** — recupero bozza dopo reload, incolla audio dagli appunti, pulsante Annulla, test chiave API, tema manuale, vibrazione/notifiche a fine elaborazione, badge di stato.
 - ♿ **Accessibile** — focus ring visibili, annunci per screen reader, contrasto AA, rispetto di reduced-motion.
 
 ### Come funziona
@@ -180,10 +195,21 @@ SoundScript è una **Progressive Web App privacy-first** che trascrive i messagg
 
 ### Privacy e dati
 
-- **Nessun backend, nessun database, nessuna analytics.** Il sito è GitHub Pages statico.
+- **Nessun backend, nessun database, nessuna analytics.** L'app è un sito statico; questo repository è pubblico proprio perché chiunque possa verificare che non c'è telemetria.
 - Chiavi API, impostazioni e cronologia vivono **solo nel tuo browser** (localStorage/sessionStorage).
-- I file audio restano **in memoria per la sola sessione corrente** (player); non finiscono mai nella cronologia.
+- I file audio restano **in memoria per la sola sessione corrente**; non finiscono mai nella cronologia.
 - Export e stampa avvengono **interamente lato client**.
+
+### Hosting e distribuzione
+
+| Cosa | Dove |
+|---|---|
+| App live (unico host ufficiale) | `https://soundscript-app.pages.dev` — Cloudflare Pages |
+| Landing page | `https://soundscript-home.pages.dev` — Cloudflare Pages |
+| Sorgente di verità | questo repository GitHub pubblico |
+| GitHub Pages | **disattivato** volontariamente |
+
+Cloudflare compila da questo repo a ogni push su `main`. Gli header di sicurezza (HSTS, X-Frame-Options, Permissions-Policy, regole cache) sono serviti tramite `public/_headers`.
 
 ### Installa come app
 
@@ -195,28 +221,32 @@ SoundScript è una **Progressive Web App privacy-first** che trascrive i messagg
 
 ### Per sviluppatori
 
-**Stack:** Vite · vanilla ES modules · [@huggingface/transformers](https://github.com/huggingface/transformers.js) · service worker artigianale.
+**Stack:** Vite · vanilla ES modules · [@huggingface/transformers](https://huggingface.co/docs/transformers.js) · service worker artigianale.
 
     SoundScript/
-    ├─ .github/workflows/deploy.yml   # deploy Pages + generazione PNG (rsvg-convert)
-    ├─ index.html                     # meta OG/Twitter, preload font self-hosted
+    ├─ index.html                  # meta OG/Twitter, preload font self-hosted
+    ├─ vite.config.js              # base "./", timbro build SW, versione app
+    ├─ package.json
     ├─ public/
-    │  ├─ manifest.json               # icone, scorciatoie, screenshot, share_target
-    │  ├─ sw.js                       # cache offline, gestore POST share-target
+    │  ├─ manifest.json            # icone, scorciatoie, screenshot, share_target
+    │  ├─ sw.js                    # cache offline, gestore POST share-target
     │  ├─ share-target.html
-    │  ├─ fonts/roboto-flex.woff2     # font variabile self-hosted
-    │  ├─ screenshots/                # screenshot reali (sostituiscono i segnaposto)
-    │  └─ *.svg                       # icone, loghi, banner OG, segnaposto
+    │  ├─ _headers                 # header Cloudflare di sicurezza e cache
+    │  ├─ robots.txt, sitemap.xml
+    │  ├─ icons/                   # PNG pre-rasterizzati (192/512/maskable/apple/OG/scorciatoie)
+    │  ├─ fonts/roboto-flex.woff2  # font variabile self-hosted
+    │  ├─ screenshots/             # screenshot reali
+    │  └─ *.svg                    # loghi, sorgenti icone, banner OG
     └─ src/
-       ├─ main.js                     # UI, orchestrazione catena, player, cronologia, export
-       ├─ providers.js                # adapter API (OpenAI/Groq/Google/Mistral/Anthropic)
-       └─ style.css                   # design system, temi, foglio di stampa
+       ├─ main.js                  # UI, orchestrazione catena, player, cronologia, export
+       ├─ providers.js             # adapter API (OpenAI/Groq/Google/Mistral/Anthropic)
+       └─ style.css                # design system, temi, foglio di stampa
 
     npm install
     npm run dev      # server di sviluppo locale
-    npm run build    # genera dist/
+    npm run build    # genera dist/ (ciò che Cloudflare pubblica)
 
-Deploy: push su `main` → GitHub Actions compila, rasterizza gli asset SVG (icone, banner OG, icone scorciatoie; segnaposto screenshot solo se i PNG reali mancano) e pubblica su Pages.
+Deploy: push su `main` → Cloudflare Pages (progetto `soundscript-app`) compila e pubblica da solo. Nessuna GitHub Actions coinvolta.
 
 ### Punti di forza prestazionali
 
@@ -241,6 +271,6 @@ Progetto personale — tutti i diritti riservati, salvo diverso file LICENSE.
 
 <div align="center">
 
-**[⬆ back to top / torna su](#top)**
+**[⬆ back to top / torna su](#-soundscript)**
 
 </div>
