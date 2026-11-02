@@ -1,35 +1,41 @@
 import { defineConfig } from "vite";
-import fs from "node:fs";
-import path from "node:path";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
-/* Dopo il build, sostituisce il segnaposto __SW_BUILD__ dentro dist/sw.js
-   con l'istante del build: così sw.js cambia a ogni deploy e il browser
-   rileva subito la nuova versione (toast di aggiornamento). */
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8"));
+
+/* Sostituisce il segnaposto __SW_BUILD__ in dist/sw.js con un timbro univoco a ogni build:
+   è così che il service worker capisce che esiste una versione nuova e si aggiorna in silenzio. */
 function stampServiceWorker() {
   return {
-    name: "stamp-service-worker",
+    name: "soundscript-sw-stamp",
     closeBundle() {
-      try {
-        const file = path.resolve("dist", "sw.js");
-        if (!fs.existsSync(file)) return;
-        const stamp = new Date().toISOString();
-        const code = fs
-          .readFileSync(file, "utf8")
-          .replace("__SW_BUILD__", stamp);
-        fs.writeFileSync(file, code);
-      } catch (e) {
-        console.warn("Timbro sw.js non applicato:", e);
-      }
+      const swPath = resolve(__dirname, "dist", "sw.js");
+      if (!existsSync(swPath)) return;
+      const src = readFileSync(swPath, "utf8");
+      writeFileSync(swPath, src.replace("__SW_BUILD__", String(Date.now())));
     }
   };
 }
 
 export default defineConfig({
-  base: "/SoundScript/",
+  /* Base RELATIVA: lo stesso build funziona su GitHub Pages (/SoundScript/)
+     e sulla root di Cloudflare Pages (soundscript-app.pages.dev). */
+  base: "./",
+
+  /* Versione mostrata in Info → Versione corrente */
   define: {
-    __APP_VERSION__: JSON.stringify(
-      "build " + new Date().toISOString().slice(0, 10).split("-").join(".")
-    )
+    __APP_VERSION__: JSON.stringify(pkg.version || "dev")
   },
+
+  build: {
+    outDir: "dist",
+    assetsDir: "assets",
+    sourcemap: false,
+    target: "es2020"
+  },
+
   plugins: [stampServiceWorker()]
 });
