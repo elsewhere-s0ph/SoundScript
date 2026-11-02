@@ -23,7 +23,7 @@
 ## 🇬🇧 English
 
 > [!TIP]
-> **Try it now:** [kevin-flynn89.github.io/SoundScript](https://soundscript-app.pages.dev/) — no signup, no server, no data leaving your device except the API calls you configure yourself.
+> **Try it now:** [https://soundscript-app.pages.dev](https://soundscript-app.pages.dev/) — no signup, no server, no data leaving your device except the API calls you configure yourself.
 
 ### What is SoundScript?
 
@@ -134,7 +134,7 @@ Personal project — all rights reserved unless a LICENSE file states otherwise.
 ## 🇮🇹 Italiano
 
 > [!TIP]
-> **Provala subito:** [kevin-flynn89.github.io/SoundScript](https://soundscript-app.pages.dev/) — niente registrazione, niente server, niente dati che lasciano il dispositivo tranne le chiamate API che configuri tu.
+> **Provala subito:** [https://soundscript-app.pages.dev](https://soundscript-app.pages.dev/) — niente registrazione, niente server, niente dati che lasciano il dispositivo tranne le chiamate API che configuri tu.
 
 ### Cos'è SoundScript?
 
