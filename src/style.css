@@ -492,3 +492,8 @@ input.search-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0
 }
 
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+
+/* ===== Toggle lingua nelle impostazioni ===== */
+#langSeg button {
+  min-width: 50px;
+}
