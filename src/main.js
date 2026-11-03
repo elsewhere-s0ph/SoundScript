@@ -1710,25 +1710,24 @@ function render() {
     };
   });
 
- /* Lingua */
-const savedLang = getLang();
-applyLang(savedLang);
-document.querySelectorAll("#langSeg button").forEach((b) => {
-  const isAuto = b.dataset.l === "auto";
-  const matchesAuto = isAuto && savedLang === detectLang();
-  const matchesExplicit = !isAuto && b.dataset.l === savedLang;
-  b.classList.toggle("active", matchesAuto || matchesExplicit);
-  b.addEventListener("click", (e) => {
-    e.preventDefault();
-    document.querySelectorAll("#langSeg button").forEach((x) => x.classList.remove("active"));
-    b.classList.add("active");
-    const lang = isAuto ? detectLang() : b.dataset.l;
-    changeLang(lang);
-    const langName = lang === "it" ? "italiano" : "English";
-    stat(t("toast.lang", { lang: langName }), 100);
-    announce(t("toast.lang", { lang: langName }));
+  /* Lingua */
+  const savedLang = getLang();
+  applyLang(savedLang);
+  document.querySelectorAll("#langSeg button").forEach((b) => {
+    const isAuto = b.dataset.l === "auto";
+    const matchesAuto = isAuto && savedLang === detectLang();
+    const matchesExplicit = !isAuto && b.dataset.l === savedLang;
+    b.classList.toggle("active", matchesAuto || matchesExplicit);
+    b.onclick = () => {
+      document.querySelectorAll("#langSeg button").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+      const lang = isAuto ? detectLang() : b.dataset.l;
+      changeLang(lang);
+      const langName = lang === "it" ? "italiano" : "English";
+      stat(t("toast.lang", { lang: langName }), 100);
+      announce(t("toast.lang", { lang: langName }));
+    };
   });
-});
 
   /* Notifiche */
   const nt = $("#notifToggle");
