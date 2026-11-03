@@ -19,6 +19,7 @@ async function getTF() {
 const SHARE_CACHE = "soundscript-share-v1";
 const SETTINGS_KEY = "vtt-settings";
 const LASTERR_KEY = "vtt-lasterr";
+const LANG_MODE_KEY = "ss-app-lang-mode";
 const TLDR_AUTO_SECONDS = 60;
 const APP_VERSION = (typeof __APP_VERSION__ === "string") ? __APP_VERSION__ : "build dev";
 
@@ -421,20 +422,70 @@ function composeInstruction(t) {
 }
 
 /* ===== Tema ===== */
-function applyTheme(t) {
+function getCurrentEffectiveTheme() {
+  const th = loadSettings().theme || "auto";
+  if (th === "light" || th === "dark") return th;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+const SUN_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+const MOON_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+function renderThemeIcon() {
+  const b = $("#themeBtnHeader");
+  if (b) b.innerHTML = getCurrentEffectiveTheme() === "dark" ? SUN_ICON : MOON_ICON;
+}
+function applyTheme(th) {
   const root = document.documentElement;
-  if (t === "light" || t === "dark") root.dataset.theme = t;
+  if (th === "light" || th === "dark") root.dataset.theme = th;
   else root.removeAttribute("data-theme");
   const metas = document.querySelectorAll('meta[name="theme-color"]');
   if (metas.length >= 2) {
     const light = metas[0], dark = metas[1];
-    if (t === "light") { light.setAttribute("media", "all"); dark.setAttribute("media", "not all"); }
-    else if (t === "dark") { dark.setAttribute("media", "all"); light.setAttribute("media", "not all"); }
+    if (th === "light") { light.setAttribute("media", "all"); dark.setAttribute("media", "not all"); }
+    else if (th === "dark") { dark.setAttribute("media", "all"); light.setAttribute("media", "not all"); }
     else {
       light.setAttribute("media", "(prefers-color-scheme: light)");
       dark.setAttribute("media", "(prefers-color-scheme: dark)");
     }
   }
+  renderThemeIcon();
+}
+function syncThemeUI() {
+  const mode = loadSettings().theme || "auto";
+  document.querySelectorAll("#themeSeg button").forEach((b) => b.classList.toggle("active", b.dataset.t === mode));
+  renderThemeIcon();
+}
+function handleThemeMode(mode) {
+  saveSettings({ theme: mode });
+  applyTheme(mode);
+  syncThemeUI();
+  stat(t("toast.theme", { theme: mode }), 100);
+  announce(t("toast.theme", { theme: mode }));
+}
+
+/* ===== Lingua (modalità auto/it/en condivisa tra header e Info) ===== */
+function getLangMode() {
+  try {
+    const m = localStorage.getItem(LANG_MODE_KEY);
+    if (m === "auto" || m === "it" || m === "en") return m;
+  } catch (e) {}
+  return "auto";
+}
+function syncLangUI(mode) {
+  document.querySelectorAll("#langSegHeader button, #langSeg button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.l === mode);
+  });
+}
+function handleLangMode(mode) {
+  try { localStorage.setItem(LANG_MODE_KEY, mode); } catch (e) {}
+  const lang = mode === "auto" ? detectLang() : mode;
+  changeLang(lang);
+  syncLangUI(mode);
+  renderStatusBadges();
+  updatePrefMsg();
+  renderHistory();
+  const langName = lang === "it" ? "italiano" : "English";
+  stat(t("toast.lang", { lang: langName }), 100);
+  announce(t("toast.lang", { lang: langName }));
 }
 
 /* ===== Notifiche ===== */
@@ -960,6 +1011,7 @@ const DROP_MARK_SVG = `<svg class="drop-mark" viewBox="0 0 80 64" aria-hidden="t
   <path d="M48 24 H72 M48 40 H66 M48 56 H58" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
   <circle cx="72" cy="56" r="4.5" fill="#06b6d4"/>
 </svg>`;
+const BRAND_MARK_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 Q12 6 18 18"/><path d="M12 14 V22"/><circle cx="12" cy="22" r="1"/></svg>`;
 
 const CHEVRON_SVG = `<svg class="chev" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>`;
 const CHEV_SVG = `<svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>`;
@@ -1030,11 +1082,9 @@ function renderKeyPortal(providerId) {
   const p = KEY_PORTALS[providerId];
   let html = "";
   if (!p) {
-    html = '<span class="kp-ico">ℹ️</span>' +
-           '<span>' + t("keys.portal.custom") + '</span>';
+    html = '<span class="kp-ico">ℹ️</span><span>' + t("keys.portal.custom") + '</span>';
   } else {
-    html = '<span class="kp-ico">🔑</span>' +
-           '<span>' + t("keys.portal", { url: p.url, name: p.name }) + '</span>';
+    html = '<span class="kp-ico">🔑</span><span>' + t("keys.portal", { url: p.url, name: p.name }) + '</span>';
   }
   if (providerId === "anthropic") {
     html += '<div class="kp-note">' + t("keys.portal.anthropic") + '</div>';
@@ -1154,6 +1204,22 @@ function clearHistory() {
 
 function render() {
   $("#app").innerHTML = `
+    <header class="app-header">
+      <div class="app-header-inner">
+        <span class="brand" aria-label="SoundScript">
+          <span class="brand-mark">${BRAND_MARK_SVG}</span>
+          <span class="brand-name">Sound<b>Script</b></span>
+        </span>
+        <div class="header-controls">
+          <div class="seg-compact" id="langSegHeader" role="group" aria-label="Lingua">
+            <button data-l="auto">Auto</button>
+            <button data-l="it">IT</button>
+            <button data-l="en">EN</button>
+          </div>
+          <button class="theme-icon-btn" id="themeBtnHeader" aria-label="Cambia tema"></button>
+        </div>
+      </div>
+    </header>
     <main>
       <div class="hero">
         <img class="hero-logo hero-logo-light" alt="SoundScript" src="logo-light.svg" width="320" height="80">
@@ -1199,8 +1265,7 @@ function render() {
         <strong data-i18n="drop.title">Trascina qui un audio</strong>
         <span data-i18n="drop.sub">oppure tocca per scegliere un file, o incollalo con Ctrl+V</span>
         <button id="pick" class="btn primary" style="margin-top:var(--space-md)" data-i18n="drop.pick">Scegli audio</button>
-        <input id="file" class="hidden" type="file"
-          accept="audio/*,.ogg,.opus,.m4a,.mp3,.wav,.aac">
+        <input id="file" class="hidden" type="file" accept="audio/*,.ogg,.opus,.m4a,.mp3,.wav,.aac">
       </div>
 
       <div class="status-row">
@@ -1455,34 +1520,21 @@ function render() {
                 <span class="ttl" data-i18n="faq.ios.title">Perché su iPhone non posso condividere audio da WhatsApp?</span>
                 ${CHEV_SVG}
               </summary>
-              <div class="faq-sub-body" data-i18n-html="faq.ios.body">
-                <p>È un limite di iOS: il sistema non consente alle app web installate di comparire nel menu Condividi di WhatsApp (su Android e desktop invece funziona).</p>
-                <p><b>Percorso alternativo su iPhone/iPad:</b></p>
-                <ol>
-                  <li>In WhatsApp, tieni premuto il vocale → <b>Inoltra/Condividi</b> → <b>Salva su File</b></li>
-                  <li>Apri SoundScript e tocca <b>"Scegli audio"</b></li>
-                  <li>Seleziona il file appena salvato dall'app <b>File</b></li>
-                </ol>
-                <p>Il risultato è identico: trascrizione, TL;DR e player funzionano come al solito.</p>
-              </div>
+              <div class="faq-sub-body" data-i18n-html="faq.ios.body"></div>
             </details>` : ""}
             <details class="faq-sub">
               <summary>
                 <span class="ttl" data-i18n="faq.data.title">Dove vengono salvati i miei audio e le trascrizioni?</span>
                 ${CHEV_SVG}
               </summary>
-              <div class="faq-sub-body" data-i18n-html="faq.data.body">
-                <p>Gli audio <b>non</b> vengono conservati: restano in memoria solo per la sessione corrente (player). Le trascrizioni e i TL;DR vivono nella cronologia locale del dispositivo, mai su server. Se ricarichi la pagina per errore, l'ultima sessione resta recuperata come bozza.</p>
-              </div>
+              <div class="faq-sub-body" data-i18n-html="faq.data.body"></div>
             </details>
             <details class="faq-sub">
               <summary>
                 <span class="ttl" data-i18n="faq.tldr.title">Perché i vocali brevi non ricevono il TL;DR automatico?</span>
                 ${CHEV_SVG}
               </summary>
-              <div class="faq-sub-body" data-i18n-html="faq.tldr.body">
-                <p>Sotto i 60 secondi il riepilogo è spesso superfluo: lo generi tu con <b>"Genera TL;DR"</b> se ti serve. Sopra il minuto parte da solo.</p>
-              </div>
+              <div class="faq-sub-body" data-i18n-html="faq.tldr.body"></div>
             </details>
           </div>
         </details>
@@ -1491,7 +1543,7 @@ function render() {
           <summary>
             <span class="si" aria-hidden="true">${REFRESH_SVG}</span>
             <span class="ttl" data-i18n="info.title">Info e aggiornamenti</span>
-            ${CHEVRON_SVG}
+            ${CHEV_SVG}
           </summary>
           <div class="faq-body">
             <div class="settings-item stack">
@@ -1695,38 +1747,30 @@ function render() {
     announce(t("toast.exported.pdf"));
   };
 
-  /* Tema */
-  const savedTheme = loadSettings().theme || "auto";
-  applyTheme(savedTheme);
+  /* ===== Tema: header + Info sincronizzati (single tap) ===== */
+  applyTheme(loadSettings().theme || "auto");
   document.querySelectorAll("#themeSeg button").forEach((b) => {
-    b.classList.toggle("active", b.dataset.t === savedTheme);
-    b.onclick = () => {
-      document.querySelectorAll("#themeSeg button").forEach((x) => x.classList.remove("active"));
-      b.classList.add("active");
-      saveSettings({ theme: b.dataset.t });
-      applyTheme(b.dataset.t);
-      stat(t("toast.theme", { theme: b.textContent }), 100);
-      announce(t("toast.theme", { theme: b.textContent }));
-    };
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      handleThemeMode(b.dataset.t);
+    });
   });
+  const thb = $("#themeBtnHeader");
+  if (thb) thb.addEventListener("click", (e) => {
+    e.preventDefault();
+    handleThemeMode(getCurrentEffectiveTheme() === "dark" ? "light" : "dark");
+  });
+  syncThemeUI();
 
-  /* Lingua */
-  const savedLang = getLang();
-  applyLang(savedLang);
-  document.querySelectorAll("#langSeg button").forEach((b) => {
-    const isAuto = b.dataset.l === "auto";
-    const matchesAuto = isAuto && savedLang === detectLang();
-    const matchesExplicit = !isAuto && b.dataset.l === savedLang;
-    b.classList.toggle("active", matchesAuto || matchesExplicit);
-    b.onclick = () => {
-      document.querySelectorAll("#langSeg button").forEach((x) => x.classList.remove("active"));
-      b.classList.add("active");
-      const lang = isAuto ? detectLang() : b.dataset.l;
-      changeLang(lang);
-      const langName = lang === "it" ? "italiano" : "English";
-      stat(t("toast.lang", { lang: langName }), 100);
-      announce(t("toast.lang", { lang: langName }));
-    };
+  /* ===== Lingua: header + Info sincronizzati (single tap) ===== */
+  const langMode = getLangMode();
+  applyLang(langMode === "auto" ? detectLang() : langMode);
+  syncLangUI(langMode);
+  document.querySelectorAll("#langSegHeader button, #langSeg button").forEach((b) => {
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      handleLangMode(b.dataset.l);
+    });
   });
 
   /* Notifiche */
@@ -1788,17 +1832,17 @@ function render() {
     g.querySelectorAll("button").forEach((b) => {
       b.onclick = () => {
         const group = g.dataset.group;
-        const t = tldrSettings();
-        t[group] = b.dataset.v;
-        saveSettings({ tldr: t });
+        const ts = tldrSettings();
+        ts[group] = b.dataset.v;
+        saveSettings({ tldr: ts });
         syncTldrUi();
       };
     });
   });
   $("#tldrCustom").oninput = (e) => {
-    const t = tldrSettings();
-    t.custom = e.target.value;
-    saveSettings({ tldr: t });
+    const ts = tldrSettings();
+    ts.custom = e.target.value;
+    saveSettings({ tldr: ts });
     syncTldrUi();
     queueDraft();
   };
@@ -1955,7 +1999,7 @@ function updateDlProgress(pct, loaded, total, fileName) {
   const p = $("#dlPct"); if (p) p.textContent = Math.round(pct) + "%";
   const fill = $("#dlFill"); if (fill) fill.style.width = pct + "%";
   const l = $("#dlLoaded"); if (l) l.textContent = fmtMB(loaded);
-  const t = $("#dlTotal"); if (t) t.textContent = "di " + fmtMB(total);
+  const tt = $("#dlTotal"); if (tt) tt.textContent = "di " + fmtMB(total);
 }
 function addDlRow(file, total) {
   const list = $("#dlList");
@@ -2013,22 +2057,22 @@ function buildLocalDD() {
 
 /* ===== UI TL;DR ===== */
 function syncTldrUi() {
-  const t = tldrSettings();
+  const ts = tldrSettings();
   document.querySelectorAll(".seg[data-group]").forEach((g) => {
     const k = g.dataset.group;
-    g.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.v === t[k]));
+    g.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.v === ts[k]));
   });
   const ci = $("#tldrCustom");
-  if (ci && document.activeElement !== ci) ci.value = t.custom || "";
-  $("#promptBox").textContent = composeInstruction(t) + "\n\nTESTO:\n[trascrizione del vocale]";
+  if (ci && document.activeElement !== ci) ci.value = ts.custom || "";
+  $("#promptBox").textContent = composeInstruction(ts) + "\n\nTESTO:\n[trascrizione del vocale]";
   updateTldrMeta();
 }
 function updateTldrMeta() {
-  const t = tldrSettings();
+  const ts = tldrSettings();
   $("#tldrMeta").textContent =
-    "Stile: " + TLR_LABEL.style[t.style] +
-    " · Lunghezza: " + TLR_LABEL.len[t.len] +
-    " · Lingua: " + TLR_LABEL.lang[t.lang];
+    "Stile: " + TLR_LABEL.style[ts.style] +
+    " · Lunghezza: " + TLR_LABEL.len[ts.len] +
+    " · Lingua: " + TLR_LABEL.lang[ts.lang];
 }
 function renderPresets() {
   const row = $("#presetRow");
@@ -2040,7 +2084,7 @@ function renderPresets() {
     const lab = document.createElement("span");
     lab.textContent = p.name;
     const x = document.createElement("span");
-    x.className = "x"; x.title = "Elimina"; x.textContent = "×";
+    x.className = "x"; x.title = t("history.delete"); x.textContent = "×";
     lab.onclick = () => {
       saveSettings({ tldr: { len: p.len, style: p.style, lang: p.lang, custom: p.custom || "" } });
       syncTldrUi();
@@ -2066,10 +2110,11 @@ function markDirty() {
   const chip = $("#unsavedChip");
   if (chip) chip.hidden = false;
 }
-function updatePrefMsg() { $("#prefMsg").textContent = "Catena attiva: " + chainLabel() + "."; }
+function updatePrefMsg() { const pm = $("#prefMsg"); if (pm) pm.textContent = t("keys.chain.note") + " " + chainLabel(); }
 
 function renderKeyList() {
   const list = $("#keyList");
+  if (!list) return;
   list.innerHTML = "";
   for (const entry of draftKeys) {
     const li = document.createElement("li");
@@ -2083,9 +2128,7 @@ function renderKeyList() {
 
     const lab = document.createElement("span");
     lab.className = "chain-label";
-    lab.textContent = entry.id === "local"
-      ? t("keys.local")
-      : entryLabel(entry);
+    lab.textContent = entry.id === "local" ? t("keys.local") : entryLabel(entry);
     li.appendChild(lab);
 
     if (entry.id !== "local") {
@@ -2343,22 +2386,16 @@ async function getLLM(showProgress) {
 }
 async function localTranscribe(file, audio) {
   const a = audio || await decode(file);
-  if (!asr) {
-    stat(t("local.first.stt"), 30);
-  } else {
-    stat(t("local.transcribing"), 30);
-  }
+  if (!asr) stat(t("local.first.stt"), 30);
+  else stat(t("local.transcribing"), 30);
   const transcriber = await getASR(false);
   const result = await transcriber(a, { language: "italian", task: "transcribe", chunk_length_s: 30, stride_length_s: 5 });
   localStorage.setItem("ss-local-ready", "1");
   return (result.text || "").trim();
 }
 async function localSummarize(transcript, instruction) {
-  if (!llm) {
-    stat(t("local.first.llm"), 75);
-  } else {
-    stat(t("local.summarizing"), 75);
-  }
+  if (!llm) stat(t("local.first.llm"), 75);
+  else stat(t("local.summarizing"), 75);
   const summarizer = await getLLM(false);
   const prompt = instruction + "\n\nTESTO:\n" + transcript;
   const output = await summarizer(prompt, { max_new_tokens: 200, temperature: 0.2, do_sample: false });
@@ -2376,7 +2413,7 @@ async function callWithRetry(entry, slot, pct, makeCall) {
   for (let s = 0; s < seq.length; s++) {
     const model = seq[s];
     if (s > 0) {
-      stat(entryLabel(entry) + ": il modello scelto ha dato errore, uso il suggerito " + model + "…", pct);
+      stat(entryLabel(entry) + ": " + t("toast.tldr.model.fallback", { engine: "", model }).replace(": ", ""), pct);
     }
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -2392,7 +2429,7 @@ async function callWithRetry(entry, slot, pct, makeCall) {
         if (st === 429 || (st >= 500 && st <= 599) || !st) {
           if (attempt === 0) {
             const why = st === 429 ? t("toast.chain.retry.rate") : (st ? t("toast.chain.retry.server") : t("toast.chain.retry.network"));
-            stat(entryLabel(entry) + ": " + why + ", riprovo tra 1,5 s…", pct);
+            stat(t("toast.chain.retry", { engine: entryLabel(entry), reason: why }), pct);
             await sleep(1500);
             continue;
           }
