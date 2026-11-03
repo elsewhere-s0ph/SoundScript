@@ -497,3 +497,10 @@ input.search-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0
 #langSeg button {
   min-width: 50px;
 }
+
+/* Fix doppio tap su mobile per segmented button */
+.seg button,
+.seg-compact button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
