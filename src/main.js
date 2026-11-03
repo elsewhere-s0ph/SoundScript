@@ -1,10 +1,42 @@
 import { PROVIDERS, listModels, classifyModels, apiTranscribe, apiSummarize } from "./providers.js";
+import { I18N, deviceLang } from "./i18n.js";
 import "./style.css";
 
 const $ = (selector) => document.querySelector(selector);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/* ===== Lotto D · Transformers.js on-demand (import dinamico) ===== */
+const SHARE_CACHE = "soundscript-share-v1";
+const SETTINGS_KEY = "vtt-settings";
+const LASTERR_KEY = "vtt-lasterr";
+const TLDR_AUTO_SECONDS = 60;
+const APP_VERSION = (typeof __APP_VERSION__ === "string") ? __APP_VERSION__ : "build dev";
+
+/* ===== i18n · lingua attiva ===== */
+let LANG = "it";
+function refreshLang() {
+  let choice = "auto";
+  try { choice = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}").lang || "auto"; } catch (e) {}
+  LANG = (choice === "it" || choice === "en") ? choice : deviceLang();
+}
+function langChoice() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}").lang || "auto"; } catch (e) { return "auto"; }
+}
+function T(key) {
+  const d = I18N[LANG] || I18N.it;
+  if (d[key] !== undefined) return d[key];
+  if (I18N.it[key] !== undefined) return I18N.it[key];
+  return key;
+}
+function LOC() { return (I18N[LANG] || I18N.it)._locale; }
+function langName(code) { return code === "it" ? T("langOptIt") : T("langOptEn"); }
+refreshLang();
+document.documentElement.lang = LANG;
+
+/* Rilevamento iOS (per la domanda FAQ sul limite di condivisione) */
+const IS_IOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+/* ===== Transformers.js on-demand (import dinamico) ===== */
 let TF = null;
 async function getTF() {
   if (!TF) {
@@ -14,16 +46,6 @@ async function getTF() {
   }
   return TF;
 }
-
-const SHARE_CACHE = "soundscript-share-v1";
-const SETTINGS_KEY = "vtt-settings";
-const LASTERR_KEY = "vtt-lasterr";
-const TLDR_AUTO_SECONDS = 60;
-const APP_VERSION = (typeof __APP_VERSION__ === "string") ? __APP_VERSION__ : "build dev";
-
-/* Rilevamento iOS (per la domanda FAQ sul limite di condivisione) */
-const IS_IOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
-  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 let asr = null;
 let llm = null;
@@ -56,12 +78,12 @@ const PLAYER_SPEEDS = [1, 1.25, 1.5, 2, 0.75];
 /* ===== Annulla elaborazione ===== */
 let abortCtrl = null;
 function throwAbort() {
-  const e = new Error("Operazione annullata");
+  const e = new Error("abort");
   e.name = "AbortError";
   throw e;
 }
 
-/* ===== 1new · Draft su ricarica (sessionStorage) ===== */
+/* ===== Draft su ricarica (sessionStorage) ===== */
 const DRAFT_KEYS = {
   txt: "ss-draft-txt",
   sum: "ss-draft-sum",
@@ -86,7 +108,7 @@ function writeDraft() {
 }
 function queueDraft() {
   clearTimeout(draftTimer);
-  draftTimer = setTimeout(writeDraft, 500); /* debounce 500 ms */
+  draftTimer = setTimeout(writeDraft, 500);
 }
 function clearDraft() {
   try { Object.values(DRAFT_KEYS).forEach((k) => sessionStorage.removeItem(k)); } catch (e) {}
@@ -102,7 +124,7 @@ function restoreDraft() {
     hasSummary = has === "1";
     const sumEl = $("#sum");
     const s = sessionStorage.getItem(DRAFT_KEYS.sum);
-    if (sumEl) sumEl.textContent = (s !== null && s !== "") ? s : "Il TL;DR comparirà qui dopo l'elaborazione.";
+    if (sumEl) sumEl.textContent = (s !== null && s !== "") ? s : T("sumPlaceholder");
     lastSttEngine = sessionStorage.getItem(DRAFT_KEYS.eng) || "";
     const d = sessionStorage.getItem(DRAFT_KEYS.dur);
     lastDurSec = (d !== null && d !== "") ? Number(d) : null;
@@ -112,16 +134,16 @@ function restoreDraft() {
       if (!isNaN(p.getTime())) lastProcessDate = p;
     }
     $("#resultStt").classList.remove("hidden");
-    $("#engStt").textContent = (lastSttEngine || "—") + " · sessione ripristinata";
-    $("#durStt").textContent = lastDurSec != null ? fmtDur(lastDurSec) : "n/d";
+    $("#engStt").textContent = (lastSttEngine || "—") + " " + T("sessionRestored");
+    $("#durStt").textContent = lastDurSec != null ? fmtDur(lastDurSec) : T("notAvailable");
     $("#all").disabled = false;
     $("#chipLlm").hidden = true;
-    $("#regen").textContent = hasSummary ? "⟳ Rigenera TL;DR" : "Genera TL;DR";
-    announce("Bozza ripristinata dopo il ricaricamento.");
+    $("#regen").textContent = hasSummary ? "⟳ " + T("genTldr") : T("genTldr");
+    announce(T("anDraftRestored"));
   } catch (e) {}
 }
 
-/* ===== 2new · Incolla file dagli appunti ===== */
+/* ===== Incolla file dagli appunti ===== */
 function isAudioFile(f) {
   if (!f) return false;
   if (f.type && f.type.startsWith("audio/")) return true;
@@ -129,7 +151,7 @@ function isAudioFile(f) {
 }
 document.addEventListener("paste", (e) => {
   const files = e.clipboardData && e.clipboardData.files;
-  if (!files || !files.length) return; /* incolla di testo normale: ignora */
+  if (!files || !files.length) return;
   for (const f of files) {
     if (isAudioFile(f)) {
       e.preventDefault();
@@ -138,15 +160,15 @@ document.addEventListener("paste", (e) => {
         drop.classList.add("over");
         setTimeout(() => drop.classList.remove("over"), 700);
       }
-      announce("Audio ricevuto dagli appunti.");
+      announce(T("stClipGot"));
       process(f);
       return;
     }
   }
-  stat("Negli appunti non c'è un audio utilizzabile.", 0);
+  stat(T("stNoClip"), 0);
 });
 
-/* ===== Lotto C · Gestione scorciatoie da manifest ===== */
+/* ===== Scorciatoie da manifest ===== */
 function handleShortcutAction() {
   const params = new URLSearchParams(window.location.search);
   const action = params.get("action");
@@ -158,31 +180,38 @@ function handleShortcutAction() {
 
   setTimeout(() => {
     if (action === "new") {
-      const fileInput = $("#file");
-      if (fileInput) {
-        fileInput.click();
-        announce("Scegli audio aperto.");
+      const drop = $("#drop");
+      const pick = $("#pick");
+      if (drop) {
+        drop.classList.add("over");
+        setTimeout(() => drop.classList.remove("over"), 1200);
       }
+      if (pick) {
+        pick.scrollIntoView({ behavior: "smooth", block: "center" });
+        pick.focus({ preventScroll: true });
+        pick.style.boxShadow = "0 0 0 5px color-mix(in srgb, var(--primary) 45%, transparent)";
+        setTimeout(() => { pick.style.boxShadow = ""; }, 2600);
+      }
+      stat(T("stShortcut"), 0);
+      announce(T("anShortcut"));
     } else if (action === "history") {
       const hist = $("#faqHist");
       if (hist) {
         hist.open = true;
-        setTimeout(() => {
-          hist.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 100);
-        announce("Cronologia aperta.");
+        setTimeout(() => hist.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+        announce(T("anHistOpened"));
       }
     }
   }, 400);
 }
 
-/* ===== Mappa portali chiavi API ===== */
+/* ===== Portali chiavi API ===== */
 const KEY_PORTALS = {
-  openai:    { name: "OpenAI",         url: "https://platform.openai.com/api-keys" },
-  groq:      { name: "Groq",           url: "https://console.groq.com/keys" },
+  openai:    { name: "OpenAI",           url: "https://platform.openai.com/api-keys" },
+  groq:      { name: "Groq",             url: "https://console.groq.com/keys" },
   google:    { name: "Google AI Studio", url: "https://aistudio.google.com/apikey" },
-  anthropic: { name: "Anthropic",      url: "https://console.anthropic.com/settings/keys" },
-  mistral:   { name: "Mistral",        url: "https://console.mistral.ai/api-keys/" },
+  anthropic: { name: "Anthropic",        url: "https://console.anthropic.com/settings/keys" },
+  mistral:   { name: "Mistral",          url: "https://console.mistral.ai/api-keys/" },
   custom:    null
 };
 
@@ -211,8 +240,10 @@ const TOAST_ICONS = {
   update: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
 };
+const SUN_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+const MOON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
 
-/* ===== B · Annunci per lettori schermo ===== */
+/* ===== Annunci per lettori schermo ===== */
 let srTimer = null;
 function announce(msg) {
   const el = $("#srStatus");
@@ -246,19 +277,19 @@ function showStatusToast(type) {
     renderToast(`
       <div class="toast-head">
         <div class="toast-ico success">${TOAST_ICONS.success}</div>
-        <div class="toast-title">App aggiornata</div>
-        <button class="toast-close" data-toast-close aria-label="Chiudi">${TOAST_ICONS.close}</button>
+        <div class="toast-title">${T("toastUpdTitle")}</div>
+        <button class="toast-close" data-toast-close aria-label="${T("toastClose")}">${TOAST_ICONS.close}</button>
       </div>
-      <div class="toast-desc">Stai usando l'ultima versione disponibile (${APP_VERSION}).</div>
+      <div class="toast-desc">${T("toastUpdDesc")(APP_VERSION)}</div>
     `, false);
   } else {
     renderToast(`
       <div class="toast-head">
         <div class="toast-ico warning">${TOAST_ICONS.warning}</div>
-        <div class="toast-title">Errore di connessione</div>
-        <button class="toast-close" data-toast-close aria-label="Chiudi">${TOAST_ICONS.close}</button>
+        <div class="toast-title">${T("toastErrTitle")}</div>
+        <button class="toast-close" data-toast-close aria-label="${T("toastClose")}">${TOAST_ICONS.close}</button>
       </div>
-      <div class="toast-desc">Impossibile verificare gli aggiornamenti. Riprova più tardi.</div>
+      <div class="toast-desc">${T("toastErrDesc")}</div>
     `, false);
   }
 }
@@ -270,7 +301,7 @@ function showInfoToast(title, desc) {
     <div class="toast-head">
       <div class="toast-ico update">${TOAST_ICONS.update}</div>
       <div class="toast-title">${title}</div>
-      <button class="toast-close" data-toast-close aria-label="Chiudi">${TOAST_ICONS.close}</button>
+      <button class="toast-close" data-toast-close aria-label="${T("toastClose")}">${TOAST_ICONS.close}</button>
     </div>
     <div class="toast-desc">${desc}</div>
   `, false);
@@ -282,31 +313,31 @@ async function checkForUpdates() {
   if (label) label.innerHTML = '<span class="mini-spinner"></span>';
   swCheckInProgress = true;
   try {
-    if (!("serviceWorker" in navigator) || !swReg) throw new Error("sw-non-disponibile");
+    if (!("serviceWorker" in navigator) || !swReg) throw new Error("sw");
     const before = navigator.serviceWorker.controller;
     await swReg.update();
     await sleep(1500);
     const after = navigator.serviceWorker.controller;
     if (after && after !== before) {
-      showInfoToast("Nuova versione installata", "Sarà attiva dal prossimo avvio dell'app.");
-      announce("Nuova versione installata. Sarà attiva dal prossimo avvio.");
+      showInfoToast(T("toastNewTitle"), T("toastNewDesc"));
+      announce(T("anNewVer"));
     } else {
       showStatusToast("success");
-      announce("App aggiornata. Stai usando l'ultima versione.");
+      announce(T("anUpdated"));
     }
   } catch (err) {
     showStatusToast("warning");
-    announce("Verifica aggiornamenti non riuscita.");
+    announce(T("anUpdateFailed"));
   } finally {
     swCheckInProgress = false;
     if (btn) btn.disabled = false;
-    if (label) label.textContent = "Controlla";
+    if (label) label.textContent = T("checkBtn");
   }
 }
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (swHadController && !swCheckInProgress) {
-      showInfoToast("Nuova versione installata", "Sarà attiva dal prossimo avvio dell'app.");
+      showInfoToast(T("toastNewTitle"), T("toastNewDesc"));
     }
   });
   window.addEventListener("load", async () => {
@@ -316,11 +347,12 @@ if ("serviceWorker" in navigator) {
       swReg = reg;
       try { await reg.update(); } catch (e) {}
     } catch (error) {
-      console.error("Registrazione service worker fallita:", error);
+      console.error("SW registration failed:", error);
     }
   });
 }
 
+/* ===== Formattazioni ===== */
 function fmtDur(s) {
   const m = Math.floor(s / 60);
   const ss = Math.floor(s % 60);
@@ -328,38 +360,20 @@ function fmtDur(s) {
 }
 function fmtMB(bytes) { return (bytes / 1048576).toFixed(1) + " MB"; }
 function fmtMs(ms) {
-  if (ms < 10000) return (ms / 1000).toFixed(1).replace(".", ",") + " s";
+  if (ms < 10000) return (ms / 1000).toFixed(1).replace(".", LANG === "it" ? "," : ".") + " s";
   if (ms < 60000) return Math.round(ms / 1000) + " s";
   return fmtDur(ms / 1000);
 }
 function fmtHistDate(iso) {
   try {
-    return new Date(iso).toLocaleString("it-IT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    return new Date(iso).toLocaleString(LOC(), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
   } catch (e) { return iso; }
 }
 function nowLabel() {
-  return new Date().toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return new Date().toLocaleString(LOC(), { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 /* ===== Regole TL;DR ===== */
-const TLR_LEN = {
-  breve: "Massimo 1 frase.",
-  medio: "Massimo 3 frasi.",
-  lungo: "Un paragrafo (5-8 frasi)."
-};
-const TLR_STYLE = {
-  narrativo: (l) => `Riassumi ${l} il seguente messaggio vocale in forma discorsiva.`,
-  elenco: (l) => `Riassumi ${l} il seguente messaggio vocale come elenco puntato.`,
-  azioni: (l) => `Estrai ${l} dal seguente messaggio vocale le azioni, gli impegni e le scadenze, come elenco puntato.`,
-  formale: (l) => `Riassumi ${l} il seguente messaggio vocale in tono formale.`,
-  informale: (l) => `Riassumi ${l} il seguente messaggio vocale in tono amichevole.`
-};
-const TLR_LANG = { it: "in italiano", auto: "nella stessa lingua del testo trascritto" };
-const TLR_LABEL = {
-  len: { breve: "breve", medio: "medio", lungo: "lungo" },
-  style: { narrativo: "narrativo", elenco: "elenco puntato", azioni: "azioni e scadenze", formale: "formale", informale: "amichevole" },
-  lang: { it: "italiano", auto: "automatica" }
-};
 const DEFAULT_TLR = { len: "medio", style: "narrativo", lang: "it", custom: "" };
 
 /* ===== Impostazioni ===== */
@@ -399,9 +413,13 @@ function updateEntry(id, patch) {
   s.keys = s.keys.map((k) => (k.id === id ? { ...k, ...patch } : k));
   saveSettings({ keys: s.keys });
 }
+function providerLabel(id) {
+  if (id === "custom") return T("customProvider");
+  return PROVIDERS[id]?.label || id;
+}
 function entryLabel(entry) {
-  if (entry.id === "local") return "Offline";
-  return PROVIDERS[entry.provider]?.label || entry.provider;
+  if (entry.id === "local") return T("offlineLabel");
+  return providerLabel(entry.provider);
 }
 function chainLabel() { return loadSettings().keys.map(entryLabel).join(" → "); }
 
@@ -409,13 +427,14 @@ function tldrSettings() {
   return { ...DEFAULT_TLR, ...(loadSettings().tldr || {}) };
 }
 function composeInstruction(t) {
-  let p = TLR_STYLE[t.style](TLR_LANG[t.lang]) + " " + TLR_LEN[t.len];
-  p += " Conserva solo le informazioni importanti. Non inventare dettagli.";
-  if (t.custom && t.custom.trim()) p += " " + t.custom.trim();
-  return p;
+  const p = I18N[LANG].prompt;
+  let out = p.style[t.style](p.lang[t.lang]) + " " + p.len[t.len];
+  out += p.tail;
+  if (t.custom && t.custom.trim()) out += " " + t.custom.trim();
+  return out;
 }
 
-/* ===== Tema manuale ===== */
+/* ===== Tema ===== */
 function applyTheme(t) {
   const root = document.documentElement;
   if (t === "light" || t === "dark") root.dataset.theme = t;
@@ -430,6 +449,57 @@ function applyTheme(t) {
       dark.setAttribute("media", "(prefers-color-scheme: dark)");
     }
   }
+  renderHeroTheme();
+}
+function effectiveTheme() {
+  const t = loadSettings().theme || "auto";
+  if (t === "light" || t === "dark") return t;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function renderHeroTheme() {
+  const b = $("#heroTheme");
+  if (b) b.innerHTML = effectiveTheme() === "dark" ? SUN_SVG : MOON_SVG;
+}
+function themeName(code) {
+  if (code === "light") return T("themeLight");
+  if (code === "dark") return T("themeDark");
+  return T("themeAuto");
+}
+function setTheme(choice) {
+  saveSettings({ theme: choice });
+  applyTheme(choice);
+  document.querySelectorAll("#themeSeg button").forEach((x) => x.classList.toggle("active", x.dataset.t === choice));
+  stat(T("stTheme")(themeName(choice)), 100);
+  announce(T("anTheme")(themeName(choice)));
+}
+try {
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if ((loadSettings().theme || "auto") === "auto") renderHeroTheme();
+  });
+} catch (e) {}
+
+/* ===== Cambio lingua (re-render preservando lo stato) ===== */
+function setLang(choice) {
+  const openIds = Array.from(document.querySelectorAll(".faq-item[open]")).map((d) => d.id);
+  const keepDraft = draftKeys ? JSON.parse(JSON.stringify(draftKeys)) : null;
+  const keepDirty = chainDirty;
+  writeDraft();
+  saveSettings({ lang: choice });
+  refreshLang();
+  document.documentElement.lang = LANG;
+  render();
+  openIds.forEach((id) => { const el = document.getElementById(id); if (el) el.open = true; });
+  if (keepDraft) {
+    draftKeys = keepDraft;
+    chainDirty = keepDirty;
+    renderKeyList();
+    updatePrefMsg();
+    const chip = $("#unsavedChip");
+    if (chip) chip.hidden = !chainDirty;
+  }
+  const name = choice === "auto" ? T("langOptAuto") + " · " + langName(LANG) : langName(choice);
+  stat(T("stLang")(name), 100);
+  announce(T("anLang")(name));
 }
 
 /* ===== Feedback fine elaborazione ===== */
@@ -437,11 +507,11 @@ function updateNotifDesc() {
   const d = $("#notifDesc");
   if (!d) return;
   const on = !!loadSettings().notify;
-  if (!on) { d.textContent = "Vibrazione (Android) e notifica se sei su un'altra scheda"; return; }
-  if (!("Notification" in window)) { d.textContent = "Attivo: vibrazione (notifiche non supportate qui)"; return; }
-  if (Notification.permission === "granted") d.textContent = "Notifiche attive su questo browser";
-  else if (Notification.permission === "denied") d.textContent = "Permesso negato dal browser: resta la vibrazione";
-  else d.textContent = "Attivo: il permesso notifiche verrà chiesto alla prossima attivazione";
+  if (!on) { d.textContent = T("notifyDescOff"); return; }
+  if (!("Notification" in window)) { d.textContent = T("notifyDescNoNotif"); return; }
+  if (Notification.permission === "granted") d.textContent = T("notifyDescGranted");
+  else if (Notification.permission === "denied") d.textContent = T("notifyDescDenied");
+  else d.textContent = T("notifyDescAsk");
 }
 function notifyDone() {
   const s = loadSettings();
@@ -449,7 +519,7 @@ function notifyDone() {
   try { if (navigator.vibrate) navigator.vibrate(10); } catch (e) {}
   try {
     if (document.hidden && "Notification" in window && Notification.permission === "granted") {
-      new Notification("SoundScript", { body: "Trascrizione pronta" });
+      new Notification("SoundScript", { body: T("stCompleted") });
     }
   } catch (e) {}
 }
@@ -461,10 +531,10 @@ function renderStatusBadges() {
   const keys = loadSettings().keys.filter((k) => k.id !== "local").length;
   const offline = localStorage.getItem("ss-local-ready") === "1";
   let html = "";
-  if (offline) html += '<span class="hbadge ok"><span class="dot"></span>Offline pronto</span>';
-  if (keys > 0) html += '<span class="hbadge api"><span class="dot"></span>API attiva · ' + keys + (keys === 1 ? " chiave" : " chiavi") + '</span>';
-  if (!keys && !offline) html += '<span class="hbadge warn"><span class="dot"></span>Solo locale · nessun modello scaricato</span>';
-  if (!keys && offline) html += '<span class="hbadge warn"><span class="dot"></span>Solo locale</span>';
+  if (offline) html += '<span class="hbadge ok"><span class="dot"></span>' + T("badgeOffline") + '</span>';
+  if (keys > 0) html += '<span class="hbadge api"><span class="dot"></span>' + T("badgeApi")(keys) + '</span>';
+  if (!keys && !offline) html += '<span class="hbadge warn"><span class="dot"></span>' + T("badgeLocalNone") + '</span>';
+  if (!keys && offline) html += '<span class="hbadge warn"><span class="dot"></span>' + T("badgeLocal") + '</span>';
   row.innerHTML = html;
 }
 
@@ -490,9 +560,9 @@ function pushHistoryEntry() {
     });
     saveHistoryList(items);
     renderHistory();
-    announce("Elaborazione completata e salvata in cronologia.");
+    announce(T("anCompleted"));
   } catch (e) {
-    console.warn("Salvataggio cronologia non riuscito:", e);
+    console.warn("History save failed:", e);
   }
 }
 function attachSummaryToLatest(summary) {
@@ -507,20 +577,21 @@ function attachSummaryToLatest(summary) {
   } catch (e) {}
 }
 
-/* ===== v1.1 · Export cronologia multi-formato ===== */
+/* ===== Export cronologia multi-formato ===== */
 function buildHistoryMD(list) {
-  let s = "# SoundScript — Cronologia\n\nGenerato: " + nowLabel() + " · " + list.length + (list.length === 1 ? " voce" : " voci") + "\n";
+  let s = "# " + T("histMdHeading") + "\n\n" + T("histGenerated")(nowLabel(), list.length) + "\n";
   list.forEach((h) => {
     s += "\n---\n\n## " + fmtHistDate(h.date) + " · " + (h.engine || "—") +
-      (h.dur != null && h.dur !== "" ? " · " + fmtDur(Number(h.dur)) : "") + "\n\n**Trascrizione**\n\n" + (h.transcript || "") + "\n";
+      (h.dur != null && h.dur !== "" ? " · " + fmtDur(Number(h.dur)) : "") +
+      "\n\n**" + T("lblTranscript") + "**\n\n" + (h.transcript || "") + "\n";
     if (h.summary) s += "\n**TL;DR**\n\n" + h.summary + "\n";
   });
   return s;
 }
 function buildHistoryTXT(list) {
-  let s = "SOUNDSCRIPT — CRONOLOGIA\nGenerato: " + nowLabel() + " · " + list.length + (list.length === 1 ? " voce" : " voci") + "\n";
+  let s = T("histTxtHeading") + "\n" + T("histGenerated")(nowLabel(), list.length) + "\n";
   list.forEach((h) => {
-    s += "\n[" + fmtHistDate(h.date) + "] " + (h.engine || "—") + "\nTRASCRIZIONE:\n" + (h.transcript || "") + "\n";
+    s += "\n[" + fmtHistDate(h.date) + "] " + (h.engine || "—") + "\n" + T("lblTranscriptTxt") + ":\n" + (h.transcript || "") + "\n";
     if (h.summary) s += "TL;DR:\n" + h.summary + "\n";
     s += "================================\n";
   });
@@ -528,24 +599,24 @@ function buildHistoryTXT(list) {
 }
 function exportHistoryFormat(kind) {
   const items = loadHistory();
-  if (!items.length) { stat("Cronologia vuota: niente da esportare.", 0); return; }
-  const name = "soundscript-cronologia-" + fileStamp();
-  if (kind === "json") { downloadFile(name + ".json", JSON.stringify(items, null, 2), "application/json"); announce("Cronologia esportata in JSON."); }
-  if (kind === "md") { downloadFile(name + ".md", buildHistoryMD(items), "text/markdown;charset=utf-8"); announce("Cronologia esportata in Markdown."); }
-  if (kind === "txt") { downloadFile(name + ".txt", buildHistoryTXT(items), "text/plain;charset=utf-8"); announce("Cronologia esportata in testo."); }
-  stat("Cronologia esportata.", 100);
+  if (!items.length) { stat(T("stHistEmpty"), 0); return; }
+  const name = "soundscript-" + (LANG === "it" ? "cronologia" : "history") + "-" + fileStamp();
+  if (kind === "json") { downloadFile(name + ".json", JSON.stringify(items, null, 2), "application/json"); announce(T("anHistExpJson")); }
+  if (kind === "md") { downloadFile(name + ".md", buildHistoryMD(items), "text/markdown;charset=utf-8"); announce(T("anHistExpMd")); }
+  if (kind === "txt") { downloadFile(name + ".txt", buildHistoryTXT(items), "text/plain;charset=utf-8"); announce(T("anHistExpTxt")); }
+  stat(T("stHistExported"), 100);
 }
 function exportSingleEntry(h) {
-  downloadFile("soundscript-voce-" + fileStamp() + ".md", buildHistoryMD([h]), "text/markdown;charset=utf-8");
-  stat("Voce esportata in Markdown.", 100);
-  announce("Voce esportata in Markdown.");
+  downloadFile("soundscript-" + fileStamp() + ".md", buildHistoryMD([h]), "text/markdown;charset=utf-8");
+  stat(T("stEntryExp"), 100);
+  announce(T("anEntryExp"));
 }
 
-/* ===== v1.1 · Import cronologia da JSON ===== */
+/* ===== Import cronologia ===== */
 async function importHistoryFile(file) {
   try {
     const data = JSON.parse(await file.text());
-    if (!Array.isArray(data)) throw new Error("struttura");
+    if (!Array.isArray(data)) throw new Error("shape");
     const items = loadHistory();
     let added = 0, dup = 0;
     data.forEach((v) => {
@@ -564,16 +635,16 @@ async function importHistoryFile(file) {
     const over = Math.max(0, items.length - 20);
     saveHistoryList(items);
     renderHistory();
-    const msg = "Importate " + added + " voci · " + dup + " duplicati scartati" + (over ? " · " + over + " oltre il limite (20)" : "");
+    const msg = T("stImported")(added, dup, over);
     stat(msg + ".", 100);
     announce(msg);
   } catch (e) {
-    stat("Import non riuscito: il file non è un backup cronologia valido.", 0);
-    announce("Import cronologia non riuscito.");
+    stat(T("stImportBad"), 0);
+    announce(T("anImportBad"));
   }
 }
 
-/* ===== v1.1 · Backup e ripristino impostazioni ===== */
+/* ===== Backup e ripristino impostazioni ===== */
 function buildSettingsBackup(full) {
   const s = loadSettings();
   const out = {
@@ -581,6 +652,7 @@ function buildSettingsBackup(full) {
     version: 1,
     exportedAt: new Date().toISOString(),
     theme: s.theme || "auto",
+    lang: s.lang || "auto",
     notify: !!s.notify,
     tldr: s.tldr || {},
     tldrPresets: Array.isArray(s.tldrPresets) ? s.tldrPresets : [],
@@ -594,9 +666,10 @@ function buildSettingsBackup(full) {
 async function importSettingsFile(file) {
   try {
     const d = JSON.parse(await file.text());
-    if (d.app !== "SoundScript" || d.version !== 1) throw new Error("formato");
+    if (d.app !== "SoundScript" || d.version !== 1) throw new Error("format");
     const patch = {};
     if (d.theme) patch.theme = d.theme;
+    if (d.lang) patch.lang = d.lang;
     if (typeof d.notify === "boolean") patch.notify = d.notify;
     if (d.tldr) patch.tldr = d.tldr;
     if (Array.isArray(d.tldrPresets)) patch.tldrPresets = d.tldrPresets;
@@ -604,22 +677,22 @@ async function importSettingsFile(file) {
     if (d.lastProvider) patch.lastProvider = d.lastProvider;
     let keysMsg = "";
     if (Array.isArray(d.keys) && d.keys.length) {
-      if (confirm("Il backup contiene " + d.keys.length + " chiavi API: importare anche la catena provider completa?\n\nOK = importa tutto · Annulla = solo le altre impostazioni")) {
+      if (confirm(T("confirmImportKeys")(d.keys.length))) {
         patch.keys = d.keys;
-        keysMsg = " Catena e chiavi incluse.";
+        keysMsg = T("stSetKeys");
       }
     }
     saveSettings(patch);
-    stat("Impostazioni importate." + keysMsg + " Ricarico l'app…", 100);
-    announce("Impostazioni importate. Ricaricamento in corso.");
+    stat(T("stSetImported") + keysMsg + T("stSetReloading"), 100);
+    announce(T("anSetImported"));
     setTimeout(() => location.reload(), 900);
   } catch (e) {
-    stat("Import non riuscito: il file non è un backup impostazioni valido.", 0);
-    announce("Import impostazioni non riuscito.");
+    stat(T("stSetBad"), 0);
+    announce(T("anSetBad"));
   }
 }
 
-/* ===== Player audio: logica ===== */
+/* ===== Player audio ===== */
 function setPlayingUI(playing) {
   const ip = $("#icoPlay"), ipa = $("#icoPause"), pl = $("#player");
   if (ip) ip.toggleAttribute("hidden", playing);
@@ -662,7 +735,7 @@ function ensureAudioEl() {
   if (sp) sp.onclick = () => {
     playerSpeedIdx = (playerSpeedIdx + 1) % PLAYER_SPEEDS.length;
     audioEl.playbackRate = PLAYER_SPEEDS[playerSpeedIdx];
-    sp.textContent = String(PLAYER_SPEEDS[playerSpeedIdx]).replace(".", ",") + "×";
+    sp.textContent = String(PLAYER_SPEEDS[playerSpeedIdx]).replace(".", LANG === "it" ? "," : ".") + "×";
   };
   const seek = $("#pSeek");
   if (seek) {
@@ -693,7 +766,7 @@ function attachAudio(file) {
     const c = $("#pCur"); if (c) c.textContent = "0:00";
     paintPlayer();
   } catch (e) {
-    console.warn("Player audio non disponibile:", e);
+    console.warn("Player unavailable:", e);
   }
 }
 function detachAudio() {
@@ -709,8 +782,8 @@ async function testApiKey() {
   if (!out) return;
   out.className = "test-result";
   const key = ($("#apiKey").value || "").trim();
-  if (!key) { out.textContent = "Incolla prima una chiave da testare."; out.classList.add("err"); return; }
-  out.textContent = "Verifica in corso…";
+  if (!key) { out.textContent = T("testPasteFirst"); out.classList.add("err"); return; }
+  out.textContent = T("testChecking");
   const temp = {
     id: "test",
     provider: providerChoice,
@@ -720,13 +793,13 @@ async function testApiKey() {
   try {
     const models = await listModels(temp);
     const cls = classifyModels(models, (PROVIDERS[providerChoice] || PROVIDERS.openai).family);
-    out.textContent = "✓ Chiave valida · " + cls.stt.length + " modelli audio e " + cls.chat.length + " modelli chat";
+    out.textContent = T("keyValid")(cls.stt.length, cls.chat.length);
     out.classList.add("ok");
-    announce("Chiave valida. " + cls.stt.length + " modelli audio e " + cls.chat.length + " modelli chat.");
+    announce(out.textContent);
   } catch (err) {
-    out.textContent = "✗ " + (describeError(err) || "errore sconosciuto");
+    out.textContent = T("keyInvalidPre") + (describeError(err) || T("errGeneric"));
     out.classList.add("err");
-    announce("Chiave non valida. " + describeError(err));
+    announce(out.textContent);
   }
 }
 
@@ -736,14 +809,14 @@ function resetSession() {
   hasSummary = false;
   const r = $("#resultStt"); if (r) r.classList.add("hidden");
   const txt = $("#txt"); if (txt) txt.value = "";
-  const sum = $("#sum"); if (sum) sum.textContent = "Il TL;DR comparirà qui dopo l'elaborazione.";
+  const sum = $("#sum"); if (sum) sum.textContent = T("sumPlaceholder");
   const chip = $("#chipLlm"); if (chip) chip.hidden = true;
-  const regen = $("#regen"); if (regen) regen.textContent = "Genera TL;DR";
+  const regen = $("#regen"); if (regen) regen.textContent = T("genTldr");
   const all = $("#all"); if (all) all.disabled = true;
   const bar = $("#bar"); if (bar) bar.style.width = "0%";
   clearDraft();
-  stat("Pronto.", 0);
-  announce("Campi svuotati. Pronto per un nuovo audio.");
+  stat(T("ready"), 0);
+  announce(T("ready"));
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -755,7 +828,7 @@ function fileStamp() {
 }
 function docDateLabel() {
   try {
-    return lastProcessDate.toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+    return lastProcessDate.toLocaleString(LOC(), { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
   } catch (e) { return String(lastProcessDate); }
 }
 function currentSum() {
@@ -764,29 +837,32 @@ function currentSum() {
 function buildTXT() {
   const sum = currentSum();
   let s = "SoundScript — " + docDateLabel() + "\n";
-  s += "Motore: " + (lastSttEngine || "—") + " | Durata: " + (lastDurSec != null ? fmtDur(lastDurSec) : "n/d") + "\n\n";
-  s += "TRASCRIZIONE\n" + (($("#txt") && $("#txt").value) || "") + "\n";
+  s += T("engine") + ": " + (lastSttEngine || "—") + " | " + T("duration") + ": " +
+    (lastDurSec != null ? fmtDur(lastDurSec) : T("notAvailable")) + "\n\n";
+  s += T("lblTranscriptTxt") + "\n" + (($("#txt") && $("#txt").value) || "") + "\n";
   if (sum) s += "\nTL;DR\n" + sum + "\n";
   return s;
 }
 function buildMD() {
   const sum = currentSum();
-  let s = "# SoundScript — Trascrizione vocale\n\n";
-  s += "- **Data:** " + docDateLabel() + "\n";
-  s += "- **Motore:** " + (lastSttEngine || "—") + "\n";
-  s += "- **Durata:** " + (lastDurSec != null ? fmtDur(lastDurSec) : "n/d") + "\n\n";
-  s += "## Trascrizione\n\n" + (($("#txt") && $("#txt").value) || "") + "\n";
+  let s = "# SoundScript — " + T("expDocKind") + "\n\n";
+  s += "- **" + T("expMetaDate") + ":** " + docDateLabel() + "\n";
+  s += "- **" + T("engine") + ":** " + (lastSttEngine || "—") + "\n";
+  s += "- **" + T("duration") + ":** " + (lastDurSec != null ? fmtDur(lastDurSec) : T("notAvailable")) + "\n\n";
+  s += "## " + T("lblTranscript") + "\n\n" + (($("#txt") && $("#txt").value) || "") + "\n";
   if (sum) s += "\n## TL;DR\n\n" + sum + "\n";
   return s;
 }
 function buildDocHTML() {
   const sum = currentSum();
   let h = "";
-  h += '<div class="pv-head">' + PRINT_LOGO_SVG + '<span class="pv-kind">Trascrizione vocale</span></div>';
-  h += '<div class="pv-meta"><span>Data: ' + docDateLabel() + '</span><span>Motore: ' + (lastSttEngine || "—") + '</span><span>Durata: ' + (lastDurSec != null ? fmtDur(lastDurSec) : "n/d") + '</span></div>';
-  h += "<h2>Trascrizione</h2><p></p>";
+  h += '<div class="pv-head">' + PRINT_LOGO_SVG + '<span class="pv-kind">' + T("expDocKind") + '</span></div>';
+  h += '<div class="pv-meta"><span>' + T("expMetaDate") + ': ' + docDateLabel() + '</span><span>' + T("engine") + ': ' +
+    (lastSttEngine || "—") + '</span><span>' + T("duration") + ': ' +
+    (lastDurSec != null ? fmtDur(lastDurSec) : T("notAvailable")) + '</span></div>';
+  h += "<h2>" + T("lblTranscript") + "</h2><p></p>";
   if (sum) h += "<h2>TL;DR</h2><p></p>";
-  h += '<div class="pv-foot"><span>Generato con SoundScript</span><span>soundscript · ' + fileStamp() + '</span></div>';
+  h += '<div class="pv-foot"><span>' + T("expGeneratedBy") + '</span><span>soundscript · ' + fileStamp() + '</span></div>';
   const wrap = document.createElement("div");
   wrap.innerHTML = h;
   const ps = wrap.querySelectorAll("p");
@@ -814,7 +890,7 @@ function ensurePrintView() {
   return pv;
 }
 
-/* ===== Chiusura menu popover (tutti) ===== */
+/* ===== Chiusura menu popover ===== */
 function closeExportMenu() {
   const m = $("#exportMenu");
   if (m) m.hidden = true;
@@ -843,15 +919,15 @@ function clearLastError(id) {
   if (id in m) { delete m[id]; localStorage.setItem(LASTERR_KEY, JSON.stringify(m)); }
 }
 function describeError(err) {
-  if (err && err.name === "AbortError") return "richiesta annullata";
+  if (err && err.name === "AbortError") return T("deAborted");
   const st = err && err.status;
-  if (st === 401 || st === 403) return "chiave non valida (HTTP " + st + ")";
-  if (st === 402) return "crediti esauriti (HTTP 402)";
-  if (st === 429) return "limite di frequenza (HTTP 429)";
-  if (st === 400) return "modello o richiesta non valida (HTTP 400)";
-  if (st === 404) return "modello non trovato (HTTP 404)";
-  if (st >= 500) return "errore del provider (HTTP " + st + ")";
-  return "errore di rete o CORS";
+  if (st === 401 || st === 403) return T("de401")(st);
+  if (st === 402) return T("de402");
+  if (st === 429) return T("de429");
+  if (st === 400) return T("de400");
+  if (st === 404) return T("de404");
+  if (st >= 500) return T("de5xx")(st);
+  return T("deNet");
 }
 
 /* ===== Suggerimento modelli ===== */
@@ -899,7 +975,7 @@ async function requestWakeLock() {
       return true;
     }
   } catch (e) {
-    console.warn("Wake lock non disponibile:", e);
+    console.warn("Wake lock unavailable:", e);
   }
   return false;
 }
@@ -915,11 +991,11 @@ function setWlBanner(mode) {
   if (mode === "ok") {
     b.hidden = false;
     b.className = "wl-banner ok";
-    b.textContent = "🔆 Schermo mantenuto attivo per il download. Puoi lasciare l'app aperta senza toccare nulla.";
+    b.textContent = T("wlOk");
   } else if (mode === "warn") {
     b.hidden = false;
     b.className = "wl-banner warn";
-    b.textContent = "⚠️ Il dispositivo non consente di tenere lo schermo acceso: tienilo attivo finché il download non completa.";
+    b.textContent = T("wlWarn");
   } else {
     b.hidden = true;
   }
@@ -940,7 +1016,7 @@ function stat(message, percent) {
   if (eq) eq.hidden = !(percent > 0 && percent < 100);
 }
 
-/* ===== Icone sezioni ===== */
+/* ===== Icone ===== */
 const TLDR_SVG = `<svg viewBox="0 0 24 24"><path d="M4 6h9"/><path d="M4 12h6"/><path d="M4 18h4"/><path d="M17 4l1.5 3.5L22 9l-3.5 1.5L17 14l-1.5-3.5L12 9l3.5-1.5z"/></svg>`;
 const HIST_SVG = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>`;
 const KEY_SVG = `<svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10 13 19 4"/><path d="M17 6l2 2"/><path d="M14 9l1.5 1.5"/></svg>`;
@@ -956,12 +1032,11 @@ const DROP_MARK_SVG = `<svg class="drop-mark" viewBox="0 0 80 64" aria-hidden="t
   <path d="M48 24 H72 M48 40 H66 M48 56 H58" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
   <circle cx="72" cy="56" r="4.5" fill="#06b6d4"/>
 </svg>`;
-
 const CHEVRON_SVG = `<svg class="chev" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>`;
 const CHEV_SVG = `<svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>`;
-const TICK_SVG = `<svg class="tick" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M378-246 154-470l43-43 181 181 384-384 43 43-427 427Z"/></svg>`;
+const TICK_SVG = `<svg class="tick" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>`;
 
-/* ===== Menu a tendina custom ===== */
+/* ===== Dropdown custom ===== */
 function closeAllDD() {
   document.querySelectorAll(".dd.open").forEach((d) => {
     d.classList.remove("open");
@@ -1019,24 +1094,20 @@ function makeDropdown(host, opts) {
   };
 }
 
-/* ===== Riga portale chiavi API ===== */
+/* ===== Riga portale chiavi ===== */
 function renderKeyPortal(providerId) {
   const box = $("#keyPortal");
   if (!box) return;
   const p = KEY_PORTALS[providerId];
   let html = "";
   if (!p) {
-    html = '<span class="kp-ico">ℹ️</span>' +
-           '<span>Endpoint personalizzato compatibile OpenAI: inserisci URL base e chiave del tuo fornitore.</span>';
+    html = '<span class="kp-ico">ℹ️</span><span>' + T("portalCustom") + '</span>';
   } else {
-    html = '<span class="kp-ico">🔑</span>' +
-           '<span>Non hai una chiave? <a href="' + p.url + '" target="_blank" rel="noopener noreferrer">' +
-           'Ottieni la tua chiave API su ' + p.name +
-           '<span class="kp-ext">↗</span></a></span>';
+    html = '<span class="kp-ico">🔑</span><span>' + T("portalNoKey") + ' <a href="' + p.url +
+      '" target="_blank" rel="noopener noreferrer">' + T("portalGet")(p.name) +
+      '<span class="kp-ext">↗</span></a></span>';
   }
-  if (providerId === "anthropic") {
-    html += '<div class="kp-note">⚠️ Anthropic non supporta la trascrizione audio: verrà usato solo per il TL;DR, la trascrizione passerà al prossimo provider della catena.</div>';
-  }
+  if (providerId === "anthropic") html += '<div class="kp-note">' + T("portalAnthropic") + '</div>';
   box.innerHTML = html;
 }
 
@@ -1068,8 +1139,8 @@ function renderHistory() {
         <div class="hist-preview"></div>
       </div>
       <div class="hist-actions">
-        <button class="icon-btn expone" title="Esporta questa voce (.md)" aria-label="Esporta questa voce in Markdown">${DL_SVG}</button>
-        <button class="icon-btn del" title="Elimina" aria-label="Elimina voce">
+        <button class="icon-btn expone" title="${T("histExpOneAria")}" aria-label="${T("histExpOneAria")}">${DL_SVG}</button>
+        <button class="icon-btn del" title="${T("histDelAria")}" aria-label="${T("histDelAria")}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
         </button>
       </div>`;
@@ -1080,17 +1151,14 @@ function renderHistory() {
     else durB.remove();
     row.querySelector(".hist-preview").textContent = h.transcript || "";
     row.onclick = () => loadHistoryEntry(h);
-    row.querySelector(".expone").onclick = (e) => {
-      e.stopPropagation();
-      exportSingleEntry(h);
-    };
+    row.querySelector(".expone").onclick = (e) => { e.stopPropagation(); exportSingleEntry(h); };
     row.querySelector(".del").onclick = (e) => {
       e.stopPropagation();
       items.splice(idx, 1);
       saveHistoryList(items);
       renderHistory();
-      stat("Voce eliminata dalla cronologia.", 100);
-      announce("Voce eliminata dalla cronologia.");
+      stat(T("stEntryDeleted"), 100);
+      announce(T("anEntryDeleted"));
     };
     listEl.appendChild(row);
   });
@@ -1098,13 +1166,13 @@ function renderHistory() {
   const empty = $("#histEmpty");
   if (empty) empty.hidden = filtered.length > 0;
   const shownLbl = $("#histShown");
-  if (shownLbl) shownLbl.textContent = filtered.length ? "mostro " + shown.length + " di " + filtered.length : "";
+  if (shownLbl) shownLbl.textContent = filtered.length ? T("histShown")(shown.length, filtered.length) : "";
   const more = $("#histMore");
   if (more) {
     if (filtered.length <= HIST_LIMIT) more.hidden = true;
     else {
       more.hidden = false;
-      more.textContent = histShowAll ? "Mostra solo le ultime 5" : "Mostra tutte (" + filtered.length + ")";
+      more.textContent = histShowAll ? T("histShowFew") : T("histShowAll")(filtered.length);
     }
   }
 }
@@ -1119,8 +1187,8 @@ function loadHistoryEntry(h) {
   lastDurSec = (h.dur != null && h.dur !== "") ? Number(h.dur) : null;
   const d = new Date(h.date);
   lastProcessDate = isNaN(d.getTime()) ? new Date() : d;
-  $("#engStt").textContent = (h.engine || "—") + " · dalla cronologia";
-  $("#durStt").textContent = lastDurSec != null ? fmtDur(lastDurSec) : "n/d";
+  $("#engStt").textContent = (h.engine || "—") + " " + T("fromHistory");
+  $("#durStt").textContent = lastDurSec != null ? fmtDur(lastDurSec) : T("notAvailable");
   const sum = $("#sum");
   if (h.summary) {
     hasSummary = true;
@@ -1128,130 +1196,130 @@ function loadHistoryEntry(h) {
     const ft = $("#faqTldr"); if (ft) ft.open = true;
   } else {
     hasSummary = false;
-    sum.textContent = "Nessun TL;DR salvato per questa voce.";
+    sum.textContent = T("histNoTldr");
   }
   $("#chipLlm").hidden = true;
-  $("#regen").textContent = "Genera TL;DR";
+  $("#regen").textContent = T("genTldr");
   $("#all").disabled = false;
   writeDraft();
-  stat("Voce caricata dalla cronologia.", 100);
-  announce("Voce caricata dalla cronologia.");
+  stat(T("stEntryLoaded"), 100);
+  announce(T("anEntryLoaded"));
   $("#resultStt").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function clearHistory() {
   const items = loadHistory();
   if (!items.length) return;
-  if (confirm("Eliminare tutte le " + items.length + " trascrizioni salvate? L'operazione non si può annullare.")) {
+  if (confirm(T("confirmClear")(items.length))) {
     saveHistoryList([]);
     renderHistory();
-    stat("Cronologia svuotata.", 100);
-    announce("Cronologia svuotata.");
+    stat(T("stHistCleared"), 100);
+    announce(T("anHistCleared"));
   }
 }
 
 function render() {
+  const lc = langChoice();
+  const savedTheme = loadSettings().theme || "auto";
+
   $("#app").innerHTML = `
     <main>
       <div class="hero">
+        <div class="hero-bar">
+          <div class="lang-pill" role="group" aria-label="${T("heroLangAria")}">
+            <button type="button" data-hlang="it" class="${LANG === "it" ? "active" : ""}">IT</button>
+            <button type="button" data-hlang="en" class="${LANG === "en" ? "active" : ""}">EN</button>
+          </div>
+          <button type="button" class="hero-theme" id="heroTheme" aria-label="${T("themeToggleAria")}"></button>
+        </div>
         <img class="hero-logo hero-logo-light" alt="SoundScript" src="logo-light.svg" width="320" height="80">
         <img class="hero-logo hero-logo-dark" alt="SoundScript" src="logo-dark.svg" width="320" height="80">
-        <p class="sub">Condividi un audio da WhatsApp oppure selezionalo qui. L'app prova le chiavi in ordine e chiude con i modelli locali.</p>
+        <p class="sub">${T("heroSub")}</p>
       </div>
 
       <section class="card" style="margin-top:0">
-        <div class="card-label">Cosa fa l'app</div>
+        <div class="card-label">${T("whatApp")}</div>
         <div class="feature-grid">
           <div class="feature-item">
             <div class="feature-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
             </div>
-            <div>
-              <h3>Elaborazione locale</h3>
-              <p>I modelli Whisper e Qwen girano sul tuo dispositivo. Zero dati al cloud.</p>
-            </div>
+            <div><h3>${T("feat1T")}</h3><p>${T("feat1D")}</p></div>
           </div>
           <div class="feature-item">
             <div class="feature-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
             </div>
-            <div>
-              <h3>Catena API intelligente</h3>
-              <p>Configura più provider. Se uno esaurisce i crediti, l'app passa al successivo.</p>
-            </div>
+            <div><h3>${T("feat2T")}</h3><p>${T("feat2D")}</p></div>
           </div>
           <div class="feature-item">
             <div class="feature-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             </div>
-            <div>
-              <h3>Condivisione diretta</h3>
-              <p>Condividi un vocale da WhatsApp direttamente a SoundScript.</p>
-            </div>
+            <div><h3>${T("feat3T")}</h3><p>${T("feat3D")}</p></div>
           </div>
         </div>
       </section>
 
       <div class="drop" id="drop">
         ${DROP_MARK_SVG}
-        <strong>Trascina qui un audio</strong>
-        <span>oppure tocca per scegliere un file, o incollalo con Ctrl+V</span>
-        <button id="pick" class="btn primary" style="margin-top:var(--space-md)">Scegli audio</button>
-        <input id="file" class="hidden" type="file"
-          accept="audio/*,.ogg,.opus,.m4a,.mp3,.wav,.aac">
+        <strong>${T("dropTitle")}</strong>
+        <span>${T("dropSub")}</span>
+        <button id="pick" class="btn primary" style="margin-top:var(--space-md)">${T("pickAudio")}</button>
+        <input id="file" class="hidden" type="file" accept="audio/*,.ogg,.opus,.m4a,.mp3,.wav,.aac">
       </div>
 
       <div class="status-row">
         <div class="spinner" id="eq" hidden></div>
-        <div id="status" class="status" role="status" aria-live="polite">Pronto.</div>
-        <button class="btn danger" id="cancelBtn" hidden>Annulla</button>
+        <div id="status" class="status" role="status" aria-live="polite">${T("ready")}</div>
+        <button class="btn danger" id="cancelBtn" hidden>${T("cancel")}</button>
       </div>
       <div class="progress"><div id="bar" class="progress-bar"></div></div>
 
       <div id="resultStt" class="card hidden">
         <div class="card-head">
-          <div class="card-label">Trascrizione</div>
-          <button class="btn ghostline" id="newBtn" style="min-height:36px;padding:0 14px" title="Svuota i campi e riparti da zero">↺ Nuovo</button>
+          <div class="card-label">${T("transcriptCard")}</div>
+          <button class="btn ghostline" id="newBtn" style="min-height:36px;padding:0 14px" title="${T("newBtnTitle")}">↺ ${T("newBtn")}</button>
         </div>
         <div class="chips">
-          <span class="chip">Motore: <b id="engStt"></b></span>
-          <span class="chip">Durata: <b id="durStt"></b></span>
+          <span class="chip">${T("engine")}: <b id="engStt"></b></span>
+          <span class="chip">${T("duration")}: <b id="durStt"></b></span>
         </div>
 
         <div class="player" id="player" hidden>
-          <button class="p-btn" id="pPlay" aria-label="Riproduci o metti in pausa">
+          <button class="p-btn" id="pPlay" aria-label="${T("playerPlay")}">
             <svg id="icoPlay" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
             <svg id="icoPause" viewBox="0 0 24 24" hidden><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
           </button>
-          <button class="p-btn" id="pBack" aria-label="Indietro di 10 secondi">-10</button>
-          <button class="p-btn" id="pFwd" aria-label="Avanti di 10 secondi">+10</button>
+          <button class="p-btn" id="pBack" aria-label="${T("playerBack")}">-10</button>
+          <button class="p-btn" id="pFwd" aria-label="${T("playerFwd")}">+10</button>
           <span class="p-time" id="pCur">0:00</span>
           <div class="p-seek" id="pSeek">
             <div class="p-fill" id="pFill"></div>
             <div class="p-knob" id="pKnob"></div>
           </div>
           <span class="p-time" id="pDur">0:00</span>
-          <button class="p-speed" id="pSpeed" aria-label="Velocità di riproduzione">1×</button>
+          <button class="p-speed" id="pSpeed" aria-label="${T("playerSpeed")}">1×</button>
         </div>
 
-        <textarea id="txt" aria-label="Testo della trascrizione"></textarea>
+        <textarea id="txt" aria-label="${T("txtAria")}"></textarea>
         <div class="actions">
-          <button id="copy" class="btn">Copia trascrizione</button>
-          <button id="share" class="btn">Condividi</button>
+          <button id="copy" class="btn">${T("copyT")}</button>
+          <button id="share" class="btn">${T("shareT")}</button>
           <div class="export-wrap">
-            <button class="btn" id="exportBtn" aria-haspopup="menu" aria-expanded="false"> Esporta</button>
+            <button class="btn" id="exportBtn" aria-haspopup="menu" aria-expanded="false">⤓ ${T("exportT")}</button>
             <div class="export-menu" id="exportMenu" hidden role="menu">
               <button class="xm-item" id="expTxt" role="menuitem">
                 <span class="xm-ico txt">📄</span>
-                <span><span class="xm-t">Testo (.txt)</span><br><span class="xm-d">Solo testo, per appunti rapidi</span></span>
+                <span><span class="xm-t">${T("expTxtT")}</span><br><span class="xm-d">${T("expTxtD")}</span></span>
               </button>
               <button class="xm-item" id="expMd" role="menuitem">
                 <span class="xm-ico md">Ⓜ️</span>
-                <span><span class="xm-t">Markdown (.md)</span><br><span class="xm-d">Con intestazioni e metadata</span></span>
+                <span><span class="xm-t">${T("expMdT")}</span><br><span class="xm-d">${T("expMdD")}</span></span>
               </button>
               <button class="xm-item" id="expPdf" role="menuitem">
                 <span class="xm-ico pdf">🖨️</span>
-                <span><span class="xm-t">PDF (stampa)</span><br><span class="xm-d">Foglio con logo → "Salva come PDF"</span></span>
+                <span><span class="xm-t">${T("expPdfT")}</span><br><span class="xm-d">${T("expPdfD")}</span></span>
               </button>
             </div>
           </div>
@@ -1262,59 +1330,59 @@ function render() {
         <details class="faq-item t0" id="faqTldr">
           <summary>
             <span class="si" aria-hidden="true">${TLDR_SVG}</span>
-            <span class="ttl">Riepilogo TL;DR</span>
+            <span class="ttl">${T("tldrTitle")}</span>
             ${CHEVRON_SVG}
           </summary>
           <div class="faq-body">
             <p class="note" id="autoNote" style="margin:0 0 var(--space-sm)"></p>
 
-            <div class="field-label" style="margin-top:0">Lunghezza</div>
+            <div class="field-label" style="margin-top:0">${T("lenLabel")}</div>
             <div class="seg" data-group="len">
-              <button data-v="breve">Breve · 1 frase</button>
-              <button data-v="medio">Medio · 3 frasi</button>
-              <button data-v="lungo">Lungo · paragrafo</button>
+              <button data-v="breve">${I18N[LANG].segLen.breve}</button>
+              <button data-v="medio">${I18N[LANG].segLen.medio}</button>
+              <button data-v="lungo">${I18N[LANG].segLen.lungo}</button>
             </div>
 
-            <div class="field-label">Stile</div>
+            <div class="field-label">${T("styleLabel")}</div>
             <div class="seg" data-group="style">
-              <button data-v="narrativo">Narrativo</button>
-              <button data-v="elenco">Elenco puntato</button>
-              <button data-v="azioni">Azioni e scadenze</button>
-              <button data-v="formale">Formale</button>
-              <button data-v="informale">Amichevole</button>
+              <button data-v="narrativo">${I18N[LANG].segStyle.narrativo}</button>
+              <button data-v="elenco">${I18N[LANG].segStyle.elenco}</button>
+              <button data-v="azioni">${I18N[LANG].segStyle.azioni}</button>
+              <button data-v="formale">${I18N[LANG].segStyle.formale}</button>
+              <button data-v="informale">${I18N[LANG].segStyle.informale}</button>
             </div>
 
-            <div class="field-label">Lingua del riepilogo</div>
+            <div class="field-label">${T("tlangUiLabel")}</div>
             <div class="seg" data-group="lang">
-              <button data-v="it">Italiano</button>
-              <button data-v="auto">Automatica · lingua dell'audio</button>
+              <button data-v="it">${I18N[LANG].segLang.it}</button>
+              <button data-v="auto">${I18N[LANG].segLang.auto}</button>
             </div>
 
-            <div class="field-label">Istruzioni personalizzate <span class="muted">(opzionali)</span></div>
-            <input id="tldrCustom" type="text" placeholder="es. evidenzia solo date e nomi di persone">
+            <div class="field-label">${T("customLabel")} <span class="muted">${T("customOptional")}</span></div>
+            <input id="tldrCustom" type="text" placeholder="${T("customPh")}">
 
-            <div class="field-label">Anteprima del prompt inviato al modello</div>
+            <div class="field-label">${T("promptLabel")}</div>
             <div class="prompt-box" id="promptBox"></div>
 
-            <div class="field-label">Preset salvati</div>
+            <div class="field-label">${T("presetsLabel")}</div>
             <div class="preset-row" id="presetRow"></div>
             <div class="preset-row">
-              <input id="presetName" type="text" placeholder="Nome del preset (es. Scadenze rapide)" style="flex:1;min-width:160px">
-              <button id="savePreset" class="btn">Salva preset</button>
+              <input id="presetName" type="text" placeholder="${T("presetPh")}" style="flex:1;min-width:160px">
+              <button id="savePreset" class="btn">${T("savePreset")}</button>
             </div>
 
             <div class="actions">
-              <button id="regen" class="btn primary">Genera TL;DR</button>
+              <button id="regen" class="btn primary">${T("genTldr")}</button>
             </div>
 
             <div class="chips" style="margin-top:var(--space-md)">
-              <span class="chip" id="chipLlm" hidden>Motore: <b id="engLlm"></b></span>
+              <span class="chip" id="chipLlm" hidden>${T("engine")}: <b id="engLlm"></b></span>
             </div>
-            <div id="sum" class="tldr-box">Il TL;DR comparirà qui dopo l'elaborazione.</div>
+            <div id="sum" class="tldr-box">${T("sumPlaceholder")}</div>
             <p id="tldrMeta" class="muted" style="margin-top:var(--space-sm)"></p>
 
             <div class="actions">
-              <button id="all" class="btn primary" disabled>Copia tutto</button>
+              <button id="all" class="btn primary" disabled>${T("copyAll")}</button>
             </div>
           </div>
         </details>
@@ -1322,105 +1390,94 @@ function render() {
         <details class="faq-item t4" id="faqHist">
           <summary>
             <span class="si" aria-hidden="true">${HIST_SVG}</span>
-            <span class="ttl">Cronologia</span>
+            <span class="ttl">${T("histTitle")}</span>
             ${CHEVRON_SVG}
           </summary>
           <div class="faq-body">
             <div class="search-wrap">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-              <input class="search-input" id="histSearch" type="text" placeholder="Cerca qui…" aria-label="Cerca nella cronologia">
+              <input class="search-input" id="histSearch" type="text" placeholder="${T("histSearchPh")}" aria-label="${T("histSearchAria")}">
             </div>
             <div class="hist-list" id="histList"></div>
-            <div class="empty" id="histEmpty" hidden><span class="em">🗂️</span>Nessuna trascrizione salvata, oppure nessun risultato per la ricerca.</div>
+            <div class="empty" id="histEmpty" hidden><span class="em">🗂️</span>${T("histEmpty")}</div>
             <div class="hist-footer">
-              <button class="btn ghostline" id="histMore">Mostra tutte</button>
+              <button class="btn ghostline" id="histMore">${T("histShowFew")}</button>
               <div class="export-wrap">
-                <button class="btn" id="histExpBtn" aria-haspopup="menu" aria-expanded="false">⤓ Esporta</button>
+                <button class="btn" id="histExpBtn" aria-haspopup="menu" aria-expanded="false">⤓ ${T("histExport")}</button>
                 <div class="export-menu" id="histExpMenu" hidden role="menu">
                   <button class="xm-item" id="histExpJson" role="menuitem">
                     <span class="xm-ico txt">{ }</span>
-                    <span><span class="xm-t">JSON</span><br><span class="xm-d">Backup completo, re-importabile</span></span>
+                    <span><span class="xm-t">${T("histExpJsonT")}</span><br><span class="xm-d">${T("histExpJsonD")}</span></span>
                   </button>
                   <button class="xm-item" id="histExpMd" role="menuitem">
                     <span class="xm-ico md">Ⓜ️</span>
-                    <span><span class="xm-t">Markdown</span><br><span class="xm-d">Documento unico leggibile</span></span>
+                    <span><span class="xm-t">${T("histExpMdT")}</span><br><span class="xm-d">${T("histExpMdD")}</span></span>
                   </button>
                   <button class="xm-item" id="histExpTxt" role="menuitem">
                     <span class="xm-ico pdf">📄</span>
-                    <span><span class="xm-t">Testo</span><br><span class="xm-d">Versione lineare semplice</span></span>
+                    <span><span class="xm-t">${T("histExpTxtT")}</span><br><span class="xm-d">${T("histExpTxtD")}</span></span>
                   </button>
                 </div>
               </div>
-              <button class="btn ghostline" id="histImpBtn">⤒ Importa JSON</button>
+              <button class="btn ghostline" id="histImpBtn">⤒ ${T("histImport")}</button>
               <input type="file" id="histImpFile" accept=".json,application/json" hidden>
-              <button class="btn danger" id="histClear">Svuota cronologia</button>
+              <button class="btn danger" id="histClear">${T("histClear")}</button>
               <span class="hist-count" id="histShown"></span>
             </div>
-            <p class="muted" style="margin-top:var(--space-sm)">
-              Le elaborazioni completate si salvano da sole su questo dispositivo (massimo 20 voci).
-              L'audio non viene conservato: il player è disponibile solo per il file appena elaborato.
-              Usa Esporta/Importa JSON per trasferire la cronologia tra dispositivi.
-            </p>
+            <p class="muted" style="margin-top:var(--space-sm)">${T("histNote")}</p>
           </div>
         </details>
 
         <details class="faq-item t1" id="faqKeys">
           <summary>
             <span class="si" aria-hidden="true">${KEY_SVG}</span>
-            <span class="ttl">Chiavi API e priorità</span>
+            <span class="ttl">${T("keysTitle")}</span>
             ${CHEVRON_SVG}
           </summary>
           <div class="faq-body">
             <div class="dd" id="ddProvider"></div>
             <div class="key-portal" id="keyPortal"></div>
             <div class="test-row">
-              <input id="apiKey" type="password" placeholder="Incolla qui la chiave API">
-              <button class="btn" id="testKeyBtn">Testa</button>
+              <input id="apiKey" type="password" placeholder="${T("keyPh")}">
+              <button class="btn" id="testKeyBtn">${T("testBtn")}</button>
             </div>
             <div class="test-result" id="testResult"></div>
-            <input id="baseUrl" type="text" placeholder="URL base (solo Personalizzato)" style="margin-top:var(--space-sm)">
+            <input id="baseUrl" type="text" placeholder="${T("baseUrlPh")}" style="margin-top:var(--space-sm)">
             <div class="actions">
-              <button id="saveKey" class="btn primary">Salva API key</button>
+              <button id="saveKey" class="btn primary">${T("saveKeyBtn")}</button>
             </div>
             <p id="keysMsg" class="muted" style="margin-top:var(--space-sm)"></p>
             <ul id="keyList" class="chain-list"></ul>
             <div class="actions">
-              <button id="saveChain" class="btn primary">Salva ordine provider</button>
-              <span id="unsavedChip" class="chip warn" hidden>Modifiche non salvate</span>
+              <button id="saveChain" class="btn primary">${T("saveChain")}</button>
+              <span id="unsavedChip" class="chip warn" hidden>${T("unsaved")}</span>
             </div>
             <p id="prefMsg" class="muted" style="margin-top:var(--space-sm)"></p>
-            <p class="muted" style="margin-top:var(--space-sm)">
-              Le modifiche alla catena restano in bozza finché non premi "Salva ordine provider".
-            </p>
+            <p class="muted" style="margin-top:var(--space-sm)">${T("chainNote")}</p>
           </div>
         </details>
 
         <details class="faq-item t2" id="faqLocal">
           <summary>
             <span class="si" aria-hidden="true">${CHIP_SVG}</span>
-            <span class="ttl">Modelli locali (fallback offline)</span>
+            <span class="ttl">${T("localTitle")}</span>
             ${CHEVRON_SVG}
           </summary>
           <div class="faq-body">
             <div id="ddLocal"></div>
             <div class="actions">
-              <button id="preload" class="btn">Scarica modelli locali ora</button>
+              <button id="preload" class="btn">${T("dlNow")}</button>
             </div>
             <div class="wl-banner" id="wlBanner" hidden></div>
             <div class="disclaimer">
               <span class="ic">ⓘ</span>
-              <span>
-                Il fallback offline scarica i modelli sul dispositivo al primo utilizzo:
-                <b>trascrizione (Whisper)</b> poche decine di MB, <b>riepilogo (modello lingua)</b> alcune centinaia di MB.
-                Preparali in <b>Wi‑Fi</b> con "Scarica modelli locali ora": durante il download
-                <b>l'app mantiene lo schermo acceso</b>.
-              </span>
+              <span>${T("localDisclaimer")}</span>
             </div>
             <div class="dl-area" id="dlArea" hidden>
               <div class="dl-head">
                 <div class="spinner" id="dlSpinner"></div>
-                <div class="dl-step" id="dlStep">Modello trascrizione (Whisper)</div>
-                <div class="dl-stepcount" id="dlStepCount">1 di 2</div>
+                <div class="dl-step" id="dlStep">${T("dlStepAsr")}</div>
+                <div class="dl-stepcount" id="dlStepCount">${T("dlCount")(1, 2)}</div>
               </div>
               <div class="dl-file">
                 <span id="dlFile">…</span>
@@ -1429,12 +1486,12 @@ function render() {
               <div class="dl-bar"><div class="dl-fill" id="dlFill"></div></div>
               <div class="dl-meta" style="display:flex;justify-content:space-between;margin-top:var(--space-xs);font-size:.8125rem;color:var(--on-surface-variant)">
                 <span id="dlLoaded">0 MB</span>
-                <span id="dlTotal">di 0 MB</span>
+                <span id="dlTotal">— 0 MB</span>
               </div>
               <div class="dl-list" id="dlList"></div>
               <div class="dl-done" id="dlDone" hidden>
                 <span class="dl-check">✓</span>
-                <span>Modelli locali pronti in cache. Il fallback funzionerà anche senza rete.</span>
+                <span>${T("dlDone")}</span>
               </div>
             </div>
           </div>
@@ -1443,44 +1500,22 @@ function render() {
         <details class="faq-item t5" id="faqFaq">
           <summary>
             <span class="si" aria-hidden="true">${FAQ_SVG}</span>
-            <span class="ttl">Domande frequenti</span>
+            <span class="ttl">${T("faqTitle")}</span>
             ${CHEVRON_SVG}
           </summary>
           <div class="faq-body">
             ${IS_IOS ? `
             <details class="faq-sub" open>
-              <summary>
-                <span class="ttl">Perché su iPhone non posso condividere audio da WhatsApp?</span>
-                ${CHEV_SVG}
-              </summary>
-              <div class="faq-sub-body">
-                <p>È un limite di iOS: il sistema non consente alle app web installate di comparire nel menu Condividi di WhatsApp (su Android e desktop invece funziona).</p>
-                <p><b>Percorso alternativo su iPhone/iPad:</b></p>
-                <ol>
-                  <li>In WhatsApp, tieni premuto il vocale → <b>Inoltra/Condividi</b> → <b>Salva su File</b></li>
-                  <li>Apri SoundScript e tocca <b>"Scegli audio"</b></li>
-                  <li>Seleziona il file appena salvato dall'app <b>File</b></li>
-                </ol>
-                <p>Il risultato è identico: trascrizione, TL;DR e player funzionano come al solito.</p>
-              </div>
+              <summary><span class="ttl">${T("faqIosT")}</span>${CHEV_SVG}</summary>
+              <div class="faq-sub-body">${T("faqIosB")}</div>
             </details>` : ""}
             <details class="faq-sub">
-              <summary>
-                <span class="ttl">Dove vengono salvati i miei audio e le trascrizioni?</span>
-                ${CHEV_SVG}
-              </summary>
-              <div class="faq-sub-body">
-                <p>Gli audio <b>non</b> vengono conservati: restano in memoria solo per la sessione corrente (player). Le trascrizioni e i TL;DR vivono nella cronologia locale del dispositivo, mai su server. Se ricarichi la pagina per errore, l'ultima sessione resta recuperata come bozza.</p>
-              </div>
+              <summary><span class="ttl">${T("faqPrivT")}</span>${CHEV_SVG}</summary>
+              <div class="faq-sub-body">${T("faqPrivB")}</div>
             </details>
             <details class="faq-sub">
-              <summary>
-                <span class="ttl">Perché i vocali brevi non ricevono il TL;DR automatico?</span>
-                ${CHEV_SVG}
-              </summary>
-              <div class="faq-sub-body">
-                <p>Sotto i 60 secondi il riepilogo è spesso superfluo: lo generi tu con <b>"Genera TL;DR"</b> se ti serve. Sopra il minuto parte da solo.</p>
-              </div>
+              <summary><span class="ttl">${T("faqAutoT")}</span>${CHEV_SVG}</summary>
+              <div class="faq-sub-body">${T("faqAutoB")}</div>
             </details>
           </div>
         </details>
@@ -1488,78 +1523,99 @@ function render() {
         <details class="faq-item t3" id="faqInfo">
           <summary>
             <span class="si" aria-hidden="true">${REFRESH_SVG}</span>
-            <span class="ttl">Info e aggiornamenti</span>
+            <span class="ttl">${T("infoTitle")}</span>
             ${CHEVRON_SVG}
           </summary>
           <div class="faq-body">
             <div class="settings-item stack">
               <div>
-                <div class="settings-item-title">Stato app</div>
-                <div class="settings-item-desc">Si aggiorna quando salvi la catena o scarichi i modelli locali</div>
+                <div class="settings-item-title">${T("statusApp")}</div>
+                <div class="settings-item-desc">${T("statusAppD")}</div>
               </div>
               <div class="hbadge-row" id="badgeRow"></div>
             </div>
-            <div class="settings-item">
+
+            <div class="settings-item stack">
               <div>
-                <div class="settings-item-title">Tema</div>
-                <div class="settings-item-desc">Auto segue il sistema; Chiaro/Scuro restano fissi</div>
+                <div class="settings-item-title">${T("langLabel")}</div>
+                <div class="settings-item-desc">${T("langDesc")}</div>
               </div>
-              <div class="seg" id="themeSeg" style="margin:0">
-                <button data-t="auto">Auto</button>
-                <button data-t="light">Chiaro</button>
-                <button data-t="dark">Scuro</button>
+              <div class="seg" id="langSeg" style="margin:0">
+                <button data-langopt="auto" class="${lc === "auto" ? "active" : ""}">${T("langOptAuto")}</button>
+                <button data-langopt="it" class="${lc === "it" ? "active" : ""}">${T("langOptIt")}</button>
+                <button data-langopt="en" class="${lc === "en" ? "active" : ""}">${T("langOptEn")}</button>
               </div>
             </div>
+
+            <div class="settings-item stack">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <div class="settings-item-title" style="margin:0">${T("tlangLabel")}</div>
+                <span class="tlang-badge">${T("tlangBadge")}</span>
+              </div>
+              <div class="settings-item-desc">${T("tlangDesc")}</div>
+            </div>
+
             <div class="settings-item">
               <div>
-                <div class="settings-item-title">Avvisami a fine elaborazione</div>
-                <div class="settings-item-desc" id="notifDesc">Vibrazione (Android) e notifica se sei su un'altra scheda</div>
+                <div class="settings-item-title">${T("themeLabel")}</div>
+                <div class="settings-item-desc">${T("themeDesc")}</div>
+              </div>
+              <div class="seg" id="themeSeg" style="margin:0">
+                <button data-t="auto" class="${savedTheme === "auto" ? "active" : ""}">${T("themeAuto")}</button>
+                <button data-t="light" class="${savedTheme === "light" ? "active" : ""}">${T("themeLight")}</button>
+                <button data-t="dark" class="${savedTheme === "dark" ? "active" : ""}">${T("themeDark")}</button>
+              </div>
+            </div>
+
+            <div class="settings-item">
+              <div>
+                <div class="settings-item-title">${T("notifyLabel")}</div>
+                <div class="settings-item-desc" id="notifDesc">${T("notifyDescOff")}</div>
               </div>
               <label class="switch">
                 <input type="checkbox" id="notifToggle">
                 <span class="track"></span>
               </label>
             </div>
+
             <div class="settings-item stack">
               <div>
-                <div class="settings-item-title">Backup impostazioni</div>
-                <div class="settings-item-desc">Tema, notifiche, preset e catena provider. Le chiavi API solo nel backup completo.</div>
+                <div class="settings-item-title">${T("backupLabel")}</div>
+                <div class="settings-item-desc">${T("backupDesc")}</div>
               </div>
               <div class="actions" style="margin:0;justify-content:flex-end">
                 <div class="export-wrap">
-                  <button class="btn" id="setExpBtn" aria-haspopup="menu" aria-expanded="false">⤓ Esporta</button>
+                  <button class="btn" id="setExpBtn" aria-haspopup="menu" aria-expanded="false">⤓ ${T("exportT")}</button>
                   <div class="export-menu" id="setExpMenu" hidden role="menu">
                     <button class="xm-item" id="setExpSafe" role="menuitem">
                       <span class="xm-ico txt">🛡️</span>
-                      <span><span class="xm-t">Sicuro · senza chiavi</span><br><span class="xm-d">Condivisibile senza rischi</span></span>
+                      <span><span class="xm-t">${T("expSafeT")}</span><br><span class="xm-d">${T("expSafeD")}</span></span>
                     </button>
                     <button class="xm-item" id="setExpFull" role="menuitem">
                       <span class="xm-ico md">🔑</span>
-                      <span><span class="xm-t">Completo · con chiavi</span><br><span class="xm-d">Per migrare su un tuo dispositivo — non condividerlo</span></span>
+                      <span><span class="xm-t">${T("expFullT")}</span><br><span class="xm-d">${T("expFullD")}</span></span>
                     </button>
                   </div>
                 </div>
-                <button class="btn ghostline" id="setImpBtn">⤒ Importa</button>
+                <button class="btn ghostline" id="setImpBtn">⤒ ${T("setImport")}</button>
                 <input type="file" id="setImpFile" accept=".json,application/json" hidden>
               </div>
             </div>
+
             <div class="settings-item">
               <div>
-                <div class="settings-item-title">Aggiornamenti</div>
-                <div class="settings-item-desc">Automatici e silenziosi: le nuove versioni si attivano in background</div>
+                <div class="settings-item-title">${T("updatesLabel")}</div>
+                <div class="settings-item-desc">${T("updatesDesc")}</div>
               </div>
-              <button class="btn" id="checkUpdateBtn"><span id="checkUpdateLabel">Controlla</span></button>
+              <button class="btn" id="checkUpdateBtn"><span id="checkUpdateLabel">${T("checkBtn")}</span></button>
             </div>
             <div class="settings-item">
               <div>
-                <div class="settings-item-title">Versione corrente</div>
+                <div class="settings-item-title">${T("versionLabel")}</div>
                 <div class="settings-item-desc" id="appVersion">—</div>
               </div>
             </div>
-            <p class="muted" style="margin-top:var(--space-sm)">
-              Nessun toast da confermare: quando esce una nuova versione il service worker si aggiorna da solo
-              e te lo segnaliamo con un avviso leggero. "Controlla" serve solo per una verifica manuale.
-            </p>
+            <p class="muted" style="margin-top:var(--space-sm)">${T("infoNote")}</p>
           </div>
         </details>
       </div>
@@ -1573,10 +1629,19 @@ function render() {
   const toastEl = $("#toast");
   if (toastEl) {
     toastEl.addEventListener("click", (e) => {
-      if (e.target.closest("[data-toast-close]")) { hideToast(); return; }
+      if (e.target.closest("[data-toast-close]")) hideToast();
     });
   }
 
+  /* Hero: lingua + tema */
+  document.querySelectorAll("[data-hlang]").forEach((b) => {
+    b.onclick = () => { if (b.dataset.hlang !== LANG || langChoice() === "auto") setLang(b.dataset.hlang); };
+  });
+  const heroTheme = $("#heroTheme");
+  if (heroTheme) heroTheme.onclick = () => setTheme(effectiveTheme() === "dark" ? "light" : "dark");
+  applyTheme(savedTheme);
+
+  /* Input file */
   $("#pick").onclick = () => $("#file").click();
   $("#file").onchange = (event) => {
     const file = event.target.files?.[0];
@@ -1593,16 +1658,14 @@ function render() {
     if (file) process(file);
   };
 
-  /* Draft: salvataggio con debounce sull'input del testo */
   const txtEl = $("#txt");
   if (txtEl) txtEl.addEventListener("input", queueDraft);
 
-  /* Cronologia wiring */
+  /* Cronologia */
   const hs = $("#histSearch"); if (hs) hs.oninput = () => renderHistory();
   const hm = $("#histMore"); if (hm) hm.onclick = () => { histShowAll = !histShowAll; renderHistory(); };
   const hc = $("#histClear"); if (hc) hc.onclick = clearHistory;
 
-  /* v1.1 · menu export cronologia */
   const histExpBtn = $("#histExpBtn");
   if (histExpBtn) histExpBtn.onclick = (e) => {
     e.stopPropagation();
@@ -1614,7 +1677,6 @@ function render() {
   const hmd = $("#histExpMd"); if (hmd) hmd.onclick = () => { closeAllMenus(); exportHistoryFormat("md"); };
   const htx = $("#histExpTxt"); if (htx) htx.onclick = () => { closeAllMenus(); exportHistoryFormat("txt"); };
 
-  /* v1.1 · import cronologia */
   const histImpBtn = $("#histImpBtn");
   if (histImpBtn) histImpBtn.onclick = () => $("#histImpFile").click();
   const histImpFile = $("#histImpFile");
@@ -1624,7 +1686,7 @@ function render() {
     if (f) importHistoryFile(f);
   };
 
-  /* v1.1 · backup impostazioni */
+  /* Backup impostazioni */
   const setExpBtn = $("#setExpBtn");
   if (setExpBtn) setExpBtn.onclick = (e) => {
     e.stopPropagation();
@@ -1635,16 +1697,16 @@ function render() {
   const setSafe = $("#setExpSafe");
   if (setSafe) setSafe.onclick = () => {
     closeAllMenus();
-    downloadFile("soundscript-impostazioni-" + fileStamp() + "-sicuro.json", JSON.stringify(buildSettingsBackup(false), null, 2), "application/json");
-    stat("Backup sicuro scaricato (senza chiavi API).", 100);
-    announce("Backup impostazioni sicuro scaricato.");
+    downloadFile("soundscript-settings-" + fileStamp() + "-safe.json", JSON.stringify(buildSettingsBackup(false), null, 2), "application/json");
+    stat(T("stBackupSafe"), 100);
+    announce(T("anBackupSafe"));
   };
   const setFull = $("#setExpFull");
   if (setFull) setFull.onclick = () => {
     closeAllMenus();
-    downloadFile("soundscript-impostazioni-" + fileStamp() + "-completo.json", JSON.stringify(buildSettingsBackup(true), null, 2), "application/json");
-    stat("Backup COMPLETO scaricato: contiene le chiavi API, non condividerlo.", 100);
-    announce("Backup completo scaricato. Contiene chiavi API: non condividerlo.");
+    downloadFile("soundscript-settings-" + fileStamp() + "-full.json", JSON.stringify(buildSettingsBackup(true), null, 2), "application/json");
+    stat(T("stBackupFull"), 100);
+    announce(T("anBackupFull"));
   };
   const setImpBtn = $("#setImpBtn");
   if (setImpBtn) setImpBtn.onclick = () => $("#setImpFile").click();
@@ -1660,7 +1722,7 @@ function render() {
   const nb = $("#newBtn"); if (nb) nb.onclick = resetSession;
   const tk = $("#testKeyBtn"); if (tk) tk.onclick = testApiKey;
 
-  /* Export trascrizione wiring */
+  /* Export trascrizione */
   const exBtn = $("#exportBtn");
   if (exBtn) exBtn.onclick = (e) => {
     e.stopPropagation();
@@ -1672,40 +1734,33 @@ function render() {
   if (exTxt) exTxt.onclick = () => {
     closeAllMenus();
     downloadFile("soundscript-" + fileStamp() + ".txt", buildTXT(), "text/plain;charset=utf-8");
-    stat("File TXT scaricato.", 100);
-    announce("File di testo scaricato.");
+    stat(T("stTxt"), 100);
+    announce(T("anTxt"));
   };
   const exMd = $("#expMd");
   if (exMd) exMd.onclick = () => {
     closeAllMenus();
     downloadFile("soundscript-" + fileStamp() + ".md", buildMD(), "text/markdown;charset=utf-8");
-    stat("File Markdown scaricato.", 100);
-    announce("File Markdown scaricato.");
+    stat(T("stMd"), 100);
+    announce(T("anMd"));
   };
   const exPdf = $("#expPdf");
   if (exPdf) exPdf.onclick = () => {
     closeAllMenus();
     ensurePrintView().innerHTML = buildDocHTML();
     window.print();
-    announce("Dialogo di stampa aperto.");
+    announce(T("anPrint"));
   };
 
-  /* Tema manuale */
-  const savedTheme = loadSettings().theme || "auto";
-  applyTheme(savedTheme);
+  /* Lingua e tema nelle Info */
+  document.querySelectorAll("#langSeg button").forEach((b) => {
+    b.onclick = () => setLang(b.dataset.langopt);
+  });
   document.querySelectorAll("#themeSeg button").forEach((b) => {
-    b.classList.toggle("active", b.dataset.t === savedTheme);
-    b.onclick = () => {
-      document.querySelectorAll("#themeSeg button").forEach((x) => x.classList.remove("active"));
-      b.classList.add("active");
-      saveSettings({ theme: b.dataset.t });
-      applyTheme(b.dataset.t);
-      stat("Tema: " + b.textContent, 100);
-      announce("Tema impostato su " + b.textContent + ".");
-    };
+    b.onclick = () => setTheme(b.dataset.t);
   });
 
-  /* Feedback fine elaborazione */
+  /* Notifiche */
   const nt = $("#notifToggle");
   if (nt) {
     nt.checked = !!loadSettings().notify;
@@ -1716,11 +1771,12 @@ function render() {
         try { await Notification.requestPermission(); } catch (e) {}
       }
       updateNotifDesc();
-      stat(nt.checked ? "Feedback di fine elaborazione attivo" : "Feedback di fine elaborazione disattivato", 100);
-      announce(nt.checked ? "Avvisi di fine elaborazione attivati." : "Avvisi di fine elaborazione disattivati.");
+      stat(nt.checked ? T("notifyLabel") + " ✓" : T("notifyLabel") + " ✕", 100);
+      announce(nt.checked ? T("notifyDescGranted") : T("notifyDescOff"));
     };
   }
 
+  /* Modelli locali */
   $("#preload").onclick = async () => {
     if (busy) return;
     busy = true;
@@ -1732,19 +1788,19 @@ function render() {
     setWlBanner(wlOk ? "ok" : "warn");
     try {
       if (navigator.storage?.persist) await navigator.storage.persist();
-      setDlStep("Modello trascrizione (Whisper)", "1 di 2");
+      setDlStep(T("dlStepAsr"), T("dlCount")(1, 2));
       await getASR(true);
-      setDlStep("Modello riepilogo (TL;DR)", "2 di 2");
+      setDlStep(T("dlStepLlm"), T("dlCount")(2, 2));
       await getLLM(true);
       hideDlSpinner();
       showDlDone();
       localStorage.setItem("ss-local-ready", "1");
       renderStatusBadges();
-      stat("Modelli locali pronti in cache.", 100);
-      announce("Modelli locali scaricati e pronti in cache.");
+      stat(T("stLocalReady"), 100);
+      announce(T("anLocalReady"));
     } catch (error) {
       hideDlSpinner();
-      stat("Download modelli locali non riuscito: " + (error?.message || error), 0);
+      stat(T("stLocalFail")(error?.message || error), 0);
     } finally {
       downloading = false;
       await releaseWakeLock();
@@ -1776,55 +1832,56 @@ function render() {
     t.custom = e.target.value;
     saveSettings({ tldr: t });
     syncTldrUi();
-    queueDraft();
   };
   $("#savePreset").onclick = () => {
     const name = $("#presetName").value.trim();
-    if (!name) { stat("Scrivi un nome per il preset.", 0); return; }
+    if (!name) { stat(T("stPresetName"), 0); return; }
     const s = loadSettings();
     const presets = Array.isArray(s.tldrPresets) ? s.tldrPresets : [];
     presets.push({ name, ...tldrSettings() });
     saveSettings({ tldrPresets: presets });
     $("#presetName").value = "";
     renderPresets();
-    stat("Preset salvato: " + name, 100);
-    announce("Preset salvato: " + name + ".");
+    stat(T("stPresetSaved")(name), 100);
+    announce(T("anPresetSaved")(name));
   };
   $("#regen").onclick = async () => {
     const transcript = $("#txt").value.trim();
-    if (!transcript) { stat("Nessuna trascrizione da riassumere: elabora prima un audio.", 0); return; }
-    if (busy) { stat("Elaborazione già in corso: attendi.", 0); return; }
+    if (!transcript) { stat(T("stNoTranscript"), 0); return; }
+    if (busy) { stat(T("stBusy"), 0); return; }
     busy = true;
     const sum = $("#sum");
     sum.classList.add("loading");
-    sum.textContent = "Genero il TL;DR con le regole impostate…";
+    sum.textContent = T("stTldrWorking");
     try {
       const r = await runSummaryChain(transcript, 0, null);
-      if (r.summary) showTldr(r.summary, r.engine, "Riepilogo generato con le regole impostate.", r.ms);
+      if (r.summary) showTldr(r.summary, r.engine, T("stTldrDoneNote"), r.ms);
       else showTldrFail(r.reasons);
-      stat("Completato.", 100);
+      stat(T("stDone"), 100);
     } catch (error) {
       sum.classList.remove("loading");
-      stat("Errore nella generazione: " + (error?.message || error), 0);
+      stat(T("stTldrErr")(error?.message || error), 0);
     } finally { busy = false; }
   };
 
   $("#copy").onclick = async () => {
     await copyText($("#txt").value);
-    stat("Trascrizione copiata.", 100);
-    announce("Trascrizione copiata negli appunti.");
+    stat(T("stCopied"), 100);
+    announce(T("anCopied"));
   };
   $("#all").onclick = async () => {
     await copyText(fullText());
-    stat(hasSummary ? "Trascrizione e riepilogo copiati." : "Trascrizione copiata.", 100);
-    announce(hasSummary ? "Trascrizione e riepilogo copiati negli appunti." : "Trascrizione copiata negli appunti.");
+    stat(hasSummary ? T("stCopiedAll") : T("stCopiedAllNo"), 100);
+    announce(hasSummary ? T("anCopiedAll") : T("anCopiedAllNo"));
   };
   $("#share").onclick = async () => {
     const text = fullText();
     try {
       if (navigator.share) await navigator.share({ title: "SoundScript", text });
-      else { await copyText(text); stat("Testo copiato: puoi incollarlo dove vuoi.", 100); }
-    } catch (error) { if (error?.name !== "AbortError") { console.error(error); stat("Impossibile condividere il testo.", 0); } }
+      else { await copyText(text); stat(T("stSharedFallback"), 100); }
+    } catch (error) {
+      if (error?.name !== "AbortError") { console.error(error); stat(T("stShareErr"), 0); }
+    }
   };
 
   $("#checkUpdateBtn").onclick = checkForUpdates;
@@ -1834,7 +1891,7 @@ function render() {
   $("#saveKey").onclick = async () => {
     const key = $("#apiKey").value.trim();
     const msg = $("#keysMsg");
-    if (!key) { msg.textContent = "Incolla prima una chiave API."; return; }
+    if (!key) { msg.textContent = T("keyEmpty"); return; }
     const entry = {
       id: "k" + Date.now(), provider: providerChoice, apiKey: key,
       baseUrl: $("#baseUrl").value.trim(),
@@ -1845,23 +1902,21 @@ function render() {
     $("#apiKey").value = ""; $("#baseUrl").value = "";
     const tr = $("#testResult"); if (tr) { tr.textContent = ""; tr.className = "test-result"; }
     markDirty(); renderKeyList();
-    msg.textContent = "Chiave aggiunta alla bozza. Rilevo i modelli disponibili…";
-    announce("Chiave aggiunta alla bozza.");
+    msg.textContent = T("keyAdded");
+    announce(T("keyAdded"));
     try {
       const cls = await ensureModels(entry, true);
       entry.suggStt = suggestModel(cls.stt, "stt", entry.provider);
       entry.suggLlm = suggestModel(cls.chat, "llm", entry.provider);
       entry.sttModel = entry.suggStt;
       entry.llmModel = entry.suggLlm;
-      msg.textContent = "Modelli rilevati. Suggeriti: trascrizione " + (entry.suggStt || "—") +
-        ", riepilogo " + (entry.suggLlm || "—") + ". Premi Salva ordine provider per attivare.";
+      msg.textContent = T("keyModelsDetected")(entry.suggStt, entry.suggLlm);
     } catch (error) {
       const p = PROVIDERS[entry.provider] || PROVIDERS.openai;
       entry.suggStt = entry.suggStt || p.recommended.stt;
       entry.suggLlm = entry.suggLlm || p.recommended.llm;
       entry.sttModel = entry.suggStt; entry.llmModel = entry.suggLlm;
-      msg.textContent = "Rilevamento modelli non riuscito (" + (error?.message || error) +
-        "): userò i consigliati del provider. Premi Salva ordine provider per attivare.";
+      msg.textContent = T("keyModelsFailed")(error?.message || error);
     }
     renderKeyList();
   };
@@ -1871,11 +1926,11 @@ function render() {
     saveSettings({ keys: JSON.parse(JSON.stringify(draftKeys)) });
     chainDirty = false;
     $("#unsavedChip").hidden = true;
-    $("#keysMsg").textContent = "Ordine provider salvato e attivo.";
+    $("#keysMsg").textContent = T("chainSaved");
     updatePrefMsg();
     renderKeyList();
     renderStatusBadges();
-    announce("Ordine provider salvato e attivo.");
+    announce(T("chainSaved"));
   };
 
   draftKeys = JSON.parse(JSON.stringify(loadSettings().keys));
@@ -1901,12 +1956,11 @@ function showTldrFail(reasons) {
   const ft = $("#faqTldr"); if (ft) ft.open = true;
   const sum = $("#sum");
   sum.classList.remove("loading");
-  sum.textContent = "TL;DR non generato. Motivi:\n• " +
-    (reasons && reasons.length ? reasons.join("\n• ") : "errore sconosciuto") +
-    "\n\nSuggerimento: controlla crediti e modelli delle chiavi nei dettagli, " +
-    "oppure prepara il fallback con \"Scarica modelli locali ora\".";
+  sum.textContent = T("tldrFailHead") + "\n• " +
+    (reasons && reasons.length ? reasons.join("\n• ") : T("tldrReasonUnknown")) +
+    "\n\n" + T("tldrFailTail");
   $("#chipLlm").hidden = true;
-  $("#regen").textContent = "⟳ Rigenera TL;DR";
+  $("#regen").textContent = "⟳ " + T("genTldr");
   $("#all").disabled = false;
   writeDraft();
 }
@@ -1935,7 +1989,7 @@ function updateDlProgress(pct, loaded, total, fileName) {
   const p = $("#dlPct"); if (p) p.textContent = Math.round(pct) + "%";
   const fill = $("#dlFill"); if (fill) fill.style.width = pct + "%";
   const l = $("#dlLoaded"); if (l) l.textContent = fmtMB(loaded);
-  const t = $("#dlTotal"); if (t) t.textContent = "di " + fmtMB(total);
+  const t = $("#dlTotal"); if (t) t.textContent = "— " + fmtMB(total);
 }
 function addDlRow(file, total) {
   const list = $("#dlList");
@@ -1961,8 +2015,8 @@ function markDlRowDone(file) {
 function buildProviderDD() {
   makeDropdown($("#ddProvider"), {
     value: providerChoice,
-    options: Object.keys(PROVIDERS).map((k) => ({ id: k, label: PROVIDERS[k].label })),
-    ariaLabel: "Provider",
+    options: Object.keys(PROVIDERS).map((k) => ({ id: k, label: providerLabel(k) })),
+    ariaLabel: T("providerDDAria"),
     onChange: (id) => {
       providerChoice = id;
       saveSettings({ lastProvider: id });
@@ -1975,14 +2029,14 @@ function buildProviderDD() {
 function buildLocalDD() {
   const s = loadSettings();
   const opts = [
-    { id: "onnx-community/whisper-tiny", label: "Tiny — più leggero" },
-    { id: "onnx-community/whisper-base", label: "Base — più accurato" }
+    { id: "onnx-community/whisper-tiny", label: T("localTiny") },
+    { id: "onnx-community/whisper-base", label: T("localBase") }
   ];
   const val = opts.some((o) => o.id === s.localModel) ? s.localModel : opts[0].id;
   makeDropdown($("#ddLocal"), {
     value: val,
     options: opts,
-    ariaLabel: "Modello Whisper locale",
+    ariaLabel: T("localDDAria"),
     onChange: (id) => {
       saveSettings({ localModel: id });
       asr = null; activeModel = null;
@@ -2000,15 +2054,17 @@ function syncTldrUi() {
   });
   const ci = $("#tldrCustom");
   if (ci && document.activeElement !== ci) ci.value = t.custom || "";
-  $("#promptBox").textContent = composeInstruction(t) + "\n\nTESTO:\n[trascrizione del vocale]";
+  const p = I18N[LANG].prompt;
+  $("#promptBox").textContent = composeInstruction(t) + "\n\n" + p.textIntro + "\n" + p.textPh;
   updateTldrMeta();
 }
 function updateTldrMeta() {
   const t = tldrSettings();
+  const m = I18N[LANG].metaLabel;
   $("#tldrMeta").textContent =
-    "Stile: " + TLR_LABEL.style[t.style] +
-    " · Lunghezza: " + TLR_LABEL.len[t.len] +
-    " · Lingua: " + TLR_LABEL.lang[t.lang];
+    m.style + ": " + I18N[LANG].metaStyle[t.style] +
+    " · " + m.len + ": " + I18N[LANG].metaLen[t.len] +
+    " · " + m.lang + ": " + I18N[LANG].metaLang[t.lang];
 }
 function renderPresets() {
   const row = $("#presetRow");
@@ -2020,12 +2076,12 @@ function renderPresets() {
     const lab = document.createElement("span");
     lab.textContent = p.name;
     const x = document.createElement("span");
-    x.className = "x"; x.title = "Elimina"; x.textContent = "×";
+    x.className = "x"; x.title = "×"; x.textContent = "×";
     lab.onclick = () => {
       saveSettings({ tldr: { len: p.len, style: p.style, lang: p.lang, custom: p.custom || "" } });
       syncTldrUi();
-      stat("Preset applicato: " + p.name, 100);
-      announce("Preset applicato: " + p.name + ".");
+      stat(T("stPresetApplied")(p.name), 100);
+      announce(T("anPresetApplied")(p.name));
     };
     x.onclick = (e) => {
       e.stopPropagation();
@@ -2033,7 +2089,7 @@ function renderPresets() {
       s.tldrPresets = s.tldrPresets.filter((_, k) => k !== i);
       saveSettings({ tldrPresets: s.tldrPresets });
       renderPresets();
-      announce("Preset eliminato.");
+      announce(T("anPresetDeleted"));
     };
     c.appendChild(lab); c.appendChild(x);
     row.appendChild(c);
@@ -2046,7 +2102,7 @@ function markDirty() {
   const chip = $("#unsavedChip");
   if (chip) chip.hidden = false;
 }
-function updatePrefMsg() { $("#prefMsg").textContent = "Catena attiva: " + chainLabel() + "."; }
+function updatePrefMsg() { $("#prefMsg").textContent = T("chainActive")(chainLabel()); }
 
 function renderKeyList() {
   const list = $("#keyList");
@@ -2063,14 +2119,13 @@ function renderKeyList() {
 
     const lab = document.createElement("span");
     lab.className = "chain-label";
-    lab.textContent = entry.id === "local"
-      ? "Fallback offline (modelli locali)"
-      : entryLabel(entry);
+    lab.textContent = entry.id === "local" ? T("localEntry") : entryLabel(entry);
     li.appendChild(lab);
 
     if (entry.id !== "local") {
       const tog = document.createElement("button");
-      tog.className = "btn"; tog.textContent = "dettagli"; tog.style.minHeight = "32px"; tog.style.padding = "0 12px"; tog.style.fontSize = ".75rem";
+      tog.className = "btn"; tog.textContent = T("detailsBtn");
+      tog.style.minHeight = "32px"; tog.style.padding = "0 12px"; tog.style.fontSize = ".75rem";
       li.appendChild(tog);
       const det = document.createElement("div");
       det.className = "details";
@@ -2094,31 +2149,31 @@ async function openDetails(det, entry, force) {
   }
   const p = PROVIDERS[entry.provider] || PROVIDERS.openai;
   det.innerHTML = `
-    <button class="kmodels btn" style="align-self:flex-start">Aggiorna modelli disponibili</button>
+    <button class="kmodels btn" style="align-self:flex-start">${T("modelsBtn")}</button>
     <p class="kmsg muted"></p>
     ${p.chatOnly ? '' : `
-    <label class="muted">Modello trascrizione (solo audio)</label>
+    <label class="muted">${T("sttModelLabel")}</label>
     <div class="ddhost" data-slot="stt"></div>
     <div class="chip" data-sugg="stt" style="margin-top:var(--space-xs)"></div>
     <p class="note" data-note="stt" style="margin-top:var(--space-xs)"></p>
     <div class="actions">
-      <button class="btn primary" data-savepref="stt">Salva preferenza modello</button>
+      <button class="btn primary" data-savepref="stt">${T("saveModelPref")}</button>
       <span class="chip ok" data-chip="stt" hidden></span>
     </div>
     `}
-    <label class="muted" style="margin-top:var(--space-md)">Modello riepilogo (solo chat)</label>
+    <label class="muted" style="margin-top:var(--space-md)">${T("llmModelLabel")}</label>
     <div class="ddhost" data-slot="llm"></div>
     <div class="chip" data-sugg="llm" style="margin-top:var(--space-xs)"></div>
     <p class="note" data-note="llm" style="margin-top:var(--space-xs)"></p>
     <div class="actions">
-      <button class="btn primary" data-savepref="llm">Salva preferenza modello</button>
+      <button class="btn primary" data-savepref="llm">${T("saveModelPref")}</button>
       <span class="chip ok" data-chip="llm" hidden></span>
     </div>
     <div class="lasterr"></div>
-    <button class="kremove btn" style="align-self:flex-start">Rimuovi chiave</button>`;
+    <button class="kremove btn" style="align-self:flex-start">${T("removeKey")}</button>`;
 
   const msg = det.querySelector(".kmsg");
-  msg.textContent = "Carico i modelli con questa chiave…";
+  msg.textContent = T("modelsLoading");
   let cls = null;
   try {
     cls = await ensureModels(entry, !!force);
@@ -2126,7 +2181,7 @@ async function openDetails(det, entry, force) {
     entry.suggLlm = suggestModel(cls.chat, "llm", entry.provider);
     if (!p.chatOnly && !entry.sttModel) entry.sttModel = entry.suggStt;
     if (!entry.llmModel) entry.llmModel = entry.suggLlm;
-    msg.textContent = (p.chatOnly ? "" : cls.stt.length + " modelli audio e ") + cls.chat.length + " modelli chat trovati.";
+    msg.textContent = p.chatOnly ? T("modelsFoundChatOnly")(cls.chat.length) : T("modelsFound")(cls.stt.length, cls.chat.length);
   } catch (error) {
     if (!p.chatOnly) {
       entry.suggStt = entry.suggStt || p.recommended.stt;
@@ -2138,7 +2193,7 @@ async function openDetails(det, entry, force) {
       stt: p.chatOnly ? [] : [{ id: entry.suggStt, label: entry.suggStt }],
       chat: [{ id: entry.suggLlm, label: entry.suggLlm }]
     };
-    msg.textContent = "Lettura modelli non riuscita: " + (error?.message || error) + ". Mostro il suggerito.";
+    msg.textContent = T("modelsFailedPre") + (error?.message || error) + T("modelsFailedPost");
   }
   det._cls = cls;
   buildKeyDropdowns(det, entry);
@@ -2156,7 +2211,7 @@ function buildKeyDropdowns(det, entry) {
       value: entry.sttModel,
       options: cls.stt,
       suggId: entry.suggStt,
-      ariaLabel: "Modello trascrizione",
+      ariaLabel: T("sttModelLabel"),
       onChange: (id) => {
         entry.sttModel = id;
         markDirty();
@@ -2169,7 +2224,7 @@ function buildKeyDropdowns(det, entry) {
     value: entry.llmModel,
     options: cls.chat,
     suggId: entry.suggLlm,
-    ariaLabel: "Modello riepilogo",
+    ariaLabel: T("llmModelLabel"),
     onChange: (id) => {
       entry.llmModel = id;
       markDirty();
@@ -2186,7 +2241,7 @@ function wireDetails(det, entry) {
     markDirty();
     renderKeyList();
     renderStatusBadges();
-    announce("Chiave rimossa dalla bozza.");
+    announce(T("removeKey"));
   };
   const sttBtn = det.querySelector('[data-savepref="stt"]');
   if (sttBtn) sttBtn.onclick = () => savePref(entry, "stt", det);
@@ -2202,8 +2257,8 @@ function savePref(entry, slot, det) {
     prefStt: entry.prefStt, prefLlm: entry.prefLlm
   });
   refreshKeyNotes(entry, det);
-  stat("Preferenza salvata: " + (slot === "stt" ? entry.sttModel : entry.llmModel), 100);
-  announce("Preferenza modello salvata.");
+  stat(T("prefSaved")(slot === "stt" ? entry.sttModel : entry.llmModel), 100);
+  announce(T("prefSaved")(slot === "stt" ? entry.sttModel : entry.llmModel));
 }
 
 function refreshKeyNotes(entry, det) {
@@ -2215,24 +2270,19 @@ function refreshKeyNotes(entry, det) {
     const suggEl = det.querySelector('[data-sugg="' + slot + '"]');
     const noteEl = det.querySelector('[data-note="' + slot + '"]');
     const chip = det.querySelector('[data-chip="' + slot + '"]');
-    if (suggEl) suggEl.textContent = "Modello suggerito: " + (sugg || "—");
-    if (noteEl) {
-      noteEl.textContent = model !== sugg
-        ? "Preferenza non vincolante: in caso di errori su " + model +
-          ", l'app proverà " + sugg + " (stessa chiave) prima di passare al provider successivo."
-        : "Stai usando il modello suggerito: in caso di errori l'app passerà al provider successivo.";
-    }
+    if (suggEl) suggEl.textContent = T("suggModel")(sugg);
+    if (noteEl) noteEl.textContent = model !== sugg ? T("noteNonBinding")(model, sugg) : T("noteSuggested");
     if (chip) {
       const pref = slot === "stt" ? entry.prefStt : entry.prefLlm;
       chip.hidden = pref !== model;
-      if (!chip.hidden) chip.textContent = "Preferenza salvata: " + model;
+      if (!chip.hidden) chip.textContent = T("prefSaved")(model);
     }
   });
 }
 
 function refreshLastErr(det, entry) {
   const box = det.querySelector(".lasterr");
-  if (box) box.textContent = "Ultimo errore: " + (loadLastErrors()[entry.id] || "nessuno");
+  if (box) box.textContent = T("lastErrPre") + (loadLastErrors()[entry.id] || T("lastErrNone"));
 }
 
 function enableSort(listEl) {
@@ -2266,7 +2316,7 @@ function enableSort(listEl) {
 /* ===== Modelli locali ===== */
 async function decode(file) {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextClass) throw new Error("Il browser non supporta la decodifica audio richiesta.");
+  if (!AudioContextClass) throw new Error("Audio decoding unsupported");
   const context = new AudioContextClass();
   try {
     const audioBuffer = await context.decodeAudioData(await file.arrayBuffer());
@@ -2298,14 +2348,14 @@ function makeProgressCallback() {
 }
 
 async function createPipeline(task, model, dtype, showProgress) {
-  const { pipeline } = await getTF(); /* chunk Transformers scaricato solo ora, se serve */
+  const { pipeline } = await getTF();
   const cb = showProgress ? makeProgressCallback() : undefined;
   try {
-    stat("Caricamento modello locale con WebGPU…", 15);
+    stat(T("stWebgpu"), 15);
     return await pipeline(task, model, { dtype, device: "webgpu", progress_callback: cb });
   } catch (webgpuError) {
-    console.warn("WebGPU non disponibile, provo WASM:", webgpuError);
-    stat("WebGPU non disponibile. Modalità compatibile…", 20);
+    console.warn("WebGPU unavailable, trying WASM:", webgpuError);
+    stat(T("stWasm"), 20);
     return await pipeline(task, model, { dtype: "q8", device: "wasm", progress_callback: cb });
   }
 }
@@ -2323,24 +2373,23 @@ async function getLLM(showProgress) {
 }
 async function localTranscribe(file, audio) {
   const a = audio || await decode(file);
-  if (!asr) {
-    stat("Primo uso della trascrizione locale: scarico il modello Whisper…", 30);
-  } else {
-    stat("Trascrizione locale in corso…", 30);
-  }
+  stat(asr ? T("stAsrRunning") : T("stFirstAsr"), 30);
   const transcriber = await getASR(false);
-  const result = await transcriber(a, { language: "italian", task: "transcribe", chunk_length_s: 30, stride_length_s: 5 });
+  /* La lingua di trascrizione segue la lingua dell'app (sincronizzata) */
+  const result = await transcriber(a, {
+    language: LANG === "it" ? "italian" : "english",
+    task: "transcribe",
+    chunk_length_s: 30,
+    stride_length_s: 5
+  });
   localStorage.setItem("ss-local-ready", "1");
   return (result.text || "").trim();
 }
 async function localSummarize(transcript, instruction) {
-  if (!llm) {
-    stat("Primo uso del riepilogo locale: scarico il modello TL;DR…", 75);
-  } else {
-    stat("Creo il riepilogo TL;DR locale…", 75);
-  }
+  stat(llm ? T("stLlmRunning") : T("stFirstLlm"), 75);
   const summarizer = await getLLM(false);
-  const prompt = instruction + "\n\nTESTO:\n" + transcript;
+  const p = I18N[LANG].prompt;
+  const prompt = instruction + "\n\n" + p.textIntro + "\n" + transcript;
   const output = await summarizer(prompt, { max_new_tokens: 200, temperature: 0.2, do_sample: false });
   localStorage.setItem("ss-local-ready", "1");
   return (output[0]?.generated_text || "").replace(prompt, "").trim();
@@ -2355,13 +2404,11 @@ async function callWithRetry(entry, slot, pct, makeCall) {
 
   for (let s = 0; s < seq.length; s++) {
     const model = seq[s];
-    if (s > 0) {
-      stat(entryLabel(entry) + ": il modello scelto ha dato errore, uso il suggerito " + model + "…", pct);
-    }
+    if (s > 0) stat(T("stChosenFail")(entryLabel(entry), model), pct);
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const out = await makeCall(entry, model);
-        if (s > 0) saveLastError(entry.id, "il modello scelto ha dato errore; completato con il suggerito " + model);
+        if (s > 0) saveLastError(entry.id, T("stChosenFail")(entryLabel(entry), model));
         else clearLastError(entry.id);
         return out;
       } catch (err) {
@@ -2371,8 +2418,8 @@ async function callWithRetry(entry, slot, pct, makeCall) {
         if (st === 401 || st === 403 || st === 402) throw err;
         if (st === 429 || (st >= 500 && st <= 599) || !st) {
           if (attempt === 0) {
-            const why = st === 429 ? "limite di frequenza" : (st ? "errore del provider" : "rete instabile o timeout");
-            stat(entryLabel(entry) + ": " + why + ", riprovo tra 1,5 s…", pct);
+            const why = st === 429 ? T("whyRate") : (st ? T("whyServer") : T("whyNet"));
+            stat(T("stRateRetry")(entryLabel(entry), why), pct);
             await sleep(1500);
             continue;
           }
@@ -2382,7 +2429,7 @@ async function callWithRetry(entry, slot, pct, makeCall) {
       }
     }
   }
-  throw new Error("Tentativi esauriti per " + entryLabel(entry));
+  throw new Error(T("errExhausted")(entryLabel(entry)));
 }
 
 async function runSummaryChain(transcript, start, signal) {
@@ -2399,35 +2446,35 @@ async function runSummaryChain(transcript, start, signal) {
         summary = await localSummarize(transcript, instruction);
         if (signal && signal.aborted) throwAbort();
       } else {
-        stat("Riepilogo TL;DR con " + entryLabel(entry) + "…", 70);
+        stat(T("stSumWith")(entryLabel(entry)), 70);
         summary = await callWithRetry(entry, "llm", 70,
           (e, m) => apiSummarize(transcript, Object.assign({}, e, { llmModel: m }), instruction, signal));
       }
       if (summary) {
         return {
           summary,
-          engine: entry.id === "local" ? "locale" : "API " + entryLabel(entry),
+          engine: entry.id === "local" ? T("localEngine") : "API " + entryLabel(entry),
           reasons,
           ms: performance.now() - t0
         };
       }
-      reasons.push(entryLabel(entry) + ": risposta vuota");
+      reasons.push(T("reasonEmpty")(entryLabel(entry)));
     } catch (error) {
       if (error && error.name === "AbortError") throw error;
-      console.warn("Riepilogo fallito (" + entryLabel(entry) + "):", error);
+      console.warn("Summary failed (" + entryLabel(entry) + "):", error);
       reasons.push(entryLabel(entry) + ": " +
         (entry.id === "local"
-          ? (error?.message || "errore del modello locale")
-          : (loadLastErrors()[entry.id] || error?.message || "errore")));
-      stat(entryLabel(entry) + " non disponibile per il TL;DR: provo la successiva…", 70);
+          ? (error?.message || T("reasonLocal"))
+          : (loadLastErrors()[entry.id] || error?.message || T("errGeneric"))));
+      stat(T("stSumFail")(entryLabel(entry)), 70);
     }
   }
   return { summary: "", engine: "", reasons, ms: performance.now() - t0 };
 }
 
 async function process(file) {
-  if (busy) { stat("Attendi che termini l'elaborazione in corso."); return; }
-  if (!file || file.size === 0) { stat("Il file audio è vuoto o non valido."); return; }
+  if (busy) { stat(T("stWaitBusy")); return; }
+  if (!file || file.size === 0) { stat(T("stEmptyFile")); return; }
   busy = true;
   hasSummary = false;
   abortCtrl = new AbortController();
@@ -2437,13 +2484,13 @@ async function process(file) {
   const fileInput = $("#file");
   if (fileInput) fileInput.disabled = true;
   try {
-    stat("Preparo l'audio…", 5);
+    stat(T("stPreparing"), 5);
     let audio = null, duration = null;
     try {
       audio = await decode(file);
       duration = audio.length / 16000;
     } catch (decErr) {
-      console.warn("Decodifica non riuscita: durata sconosciuta.", decErr);
+      console.warn("Decode failed: unknown duration.", decErr);
     }
     if (signal.aborted) throwAbort();
     const autoTldr = duration === null || duration >= TLDR_AUTO_SECONDS;
@@ -2458,9 +2505,9 @@ async function process(file) {
         if (entry.id === "local") {
           transcript = await localTranscribe(file, audio);
           if (signal.aborted) throwAbort();
-          sttEngine = "locale";
+          sttEngine = T("localEngine");
         } else {
-          stat("Trascrizione con " + entryLabel(entry) + "…", 30);
+          stat(T("stSttWith")(entryLabel(entry)), 30);
           transcript = await callWithRetry(entry, "stt", 30,
             (e, m) => apiTranscribe(file, Object.assign({}, e, { sttModel: m }), signal));
           sttEngine = "API " + entryLabel(entry);
@@ -2468,40 +2515,36 @@ async function process(file) {
         if (transcript) { okIndex = i; break; }
       } catch (error) {
         if (error && error.name === "AbortError") throw error;
-        console.warn("Voce catena fallita (" + entryLabel(entry) + "):", error);
-        stat(entryLabel(entry) + " non disponibile (" +
-          (loadLastErrors()[entry.id] || "errore") + "): provo la successiva…", 30);
+        console.warn("Chain entry failed (" + entryLabel(entry) + "):", error);
+        stat(T("stSttFail")(entryLabel(entry), loadLastErrors()[entry.id] || T("errGeneric")), 30);
       }
     }
-    if (!transcript) throw new Error("Nessuna chiave né il modello locale hanno riconosciuto testo.");
+    if (!transcript) throw new Error(T("stNoText"));
     showTranscript(transcript, sttEngine, duration, performance.now() - tStt);
     attachAudio(file);
 
     if (autoTldr) {
-      $("#autoNote").textContent = duration === null
-        ? "Durata non leggibile: il riepilogo viene generato automaticamente."
-        : "Audio oltre il minuto (" + fmtDur(duration) + "): il riepilogo viene generato automaticamente.";
+      $("#autoNote").textContent = duration === null ? T("stDurUnknown") : T("stDurLong")(fmtDur(duration));
       const r = await runSummaryChain(transcript, okIndex, signal);
       if (r.summary) showTldr(r.summary, r.engine, null, r.ms);
       else showTldrFail(r.reasons);
     } else {
-      $("#autoNote").textContent = "Audio breve (" + fmtDur(duration) +
-        "): trascrizione completata. Il riepilogo non è stato generato automaticamente.";
-      $("#sum").textContent = "Nessun TL;DR per ora: tocca Genera TL;DR se ti serve.";
-      $("#regen").textContent = "Genera TL;DR";
+      $("#autoNote").textContent = T("stDurShort")(fmtDur(duration));
+      $("#sum").textContent = T("stNoTldrYet");
+      $("#regen").textContent = T("genTldr");
       writeDraft();
     }
     pushHistoryEntry();
     renderStatusBadges();
     notifyDone();
-    stat("Completato e salvato in cronologia.", 100);
+    stat(T("stCompleted"), 100);
   } catch (error) {
     if (error && error.name === "AbortError") {
-      stat("Elaborazione annullata. Pronto a riprovare.", 0);
-      announce("Elaborazione annullata.");
+      stat(T("stAborted"), 0);
+      announce(T("anAborted"));
     } else {
-      console.error("Errore durante l'elaborazione:", error);
-      stat("Impossibile elaborare l'audio: " + (error?.message || String(error)), 0);
+      console.error("Processing error:", error);
+      stat(T("stProcErr")(error?.message || String(error)), 0);
     }
   } finally {
     busy = false;
@@ -2517,7 +2560,7 @@ function showTranscript(transcript, engine, duration, ms) {
   lastProcessDate = new Date();
   $("#resultStt").classList.remove("hidden");
   $("#engStt").textContent = engine + " · " + fmtMs(ms);
-  $("#durStt").textContent = duration === null ? "n/d" : fmtDur(duration);
+  $("#durStt").textContent = duration === null ? T("notAvailable") : fmtDur(duration);
   $("#txt").value = transcript;
   $("#all").disabled = false;
   writeDraft();
@@ -2530,7 +2573,7 @@ function showTldr(summary, engine, note, ms) {
   sum.textContent = summary;
   $("#engLlm").textContent = engine + (ms != null ? " · " + fmtMs(ms) : "");
   $("#chipLlm").hidden = false;
-  $("#regen").textContent = "⟳ Rigenera TL;DR";
+  $("#regen").textContent = "⟳ " + T("genTldr");
   if (note) $("#autoNote").textContent = note;
   updateTldrMeta();
   $("#all").disabled = false;
@@ -2544,19 +2587,19 @@ async function copyText(text) {
   textarea.value = text; textarea.style.position = "fixed"; textarea.style.opacity = "0";
   document.body.appendChild(textarea); textarea.select();
   const copied = document.execCommand("copy"); textarea.remove();
-  if (!copied) throw new Error("Copia negli appunti non riuscita.");
+  if (!copied) throw new Error("copy failed");
 }
 
 async function loadShared() {
   const params = new URLSearchParams(location.search);
-  if (params.has("share-error")) { history.replaceState({}, "", location.pathname); stat("Non è stato possibile ricevere l'audio. Riprova.", 0); return; }
+  if (params.has("share-error")) { history.replaceState({}, "", location.pathname); stat(T("stShareCant"), 0); return; }
   if (params.get("shared") !== "1") return;
   try {
-    if (!("caches" in window)) throw new Error("La cache del browser non è disponibile.");
+    if (!("caches" in window)) throw new Error("cache unavailable");
     const cache = await caches.open(SHARE_CACHE);
     const audioUrlShared = new URL("shared-audio", document.baseURI).href;
     const response = await cache.match(audioUrlShared);
-    if (!response) { stat("Audio condiviso non trovato. Prova a condividerlo di nuovo.", 0); return; }
+    if (!response) { stat(T("stShareNotFound"), 0); return; }
     const blob = await response.blob();
     const encoded = response.headers.get("X-SoundScript-Filename") || "audio";
     let filename = "audio";
@@ -2565,9 +2608,9 @@ async function loadShared() {
     history.replaceState({}, "", location.pathname);
     await process(new File([blob], filename, { type: blob.type || "audio/ogg" }));
   } catch (error) {
-    console.error("Errore nel recupero dell'audio condiviso:", error);
+    console.error("Shared audio error:", error);
     history.replaceState({}, "", location.pathname);
-    stat("Errore nella ricezione dell'audio condiviso. Riprova.", 0);
+    stat(T("stShareErr"), 0);
   }
 }
 
