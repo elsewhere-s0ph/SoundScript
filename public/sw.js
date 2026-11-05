@@ -1,7 +1,8 @@
-/* Timbro di build: sostituito automaticamente da vite.config.js a ogni deploy */
+/* Timbro di build: sostituito automaticamente da vite.config.js a ogni deploy.
+   Ora dà anche il nome alla cache: ogni deploy ha la sua, le vecchie vengono eliminate. */
 const SW_BUILD = "__SW_BUILD__";
 
-const CORE_CACHE = "soundscript-core-v2";
+const CORE_CACHE = "soundscript-core-" + SW_BUILD;
 const SHARE_CACHE = "soundscript-share-v1";
 const CORE_ASSETS = [
   "./",
@@ -63,8 +64,8 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  /* FIX SCORCIATOIE: manifest SEMPRE dalla rete (fallback cache solo offline).
-     Così le installazioni esistenti ricevono le shortcuts senza reinstallare. */
+  /* Manifest sempre dalla rete (fallback cache solo offline):
+     le installazioni esistenti ricevono le scorciatoie aggiornate senza reinstallare */
   if (url.pathname.endsWith("/manifest.json")) {
     event.respondWith(
       fetch(req)
@@ -83,11 +84,11 @@ self.addEventListener("fetch", (event) => {
     caches.match(req).then((hit) => {
       const fresh = fetch(req)
         .then((res) => {
-        if (res && res.status === 200) {
-          const copy = res.clone();
-          caches.open(CORE_CACHE).then((c) => c.put(req, copy));
-        }
-        return res;
+          if (res && res.status === 200) {
+            const copy = res.clone();
+            caches.open(CORE_CACHE).then((c) => c.put(req, copy));
+          }
+          return res;
         })
         .catch(() => hit);
       return hit || fresh;

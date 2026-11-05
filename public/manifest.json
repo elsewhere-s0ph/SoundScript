@@ -1,101 +1,50 @@
 {
-  "name": "SoundScript",
+  "name": "SoundScript — Trascrivi i vocali in un tap",
   "short_name": "SoundScript",
-  "description": "Trascrivi i vocali di WhatsApp in testo e riassunti, senza server.",
+  "description": "Trascrivi i vocali di WhatsApp in testo e riassunti TL;DR, senza server: catena API intelligente e modelli locali offline.",
+  "id": "https://soundscript-app.pages.dev/",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "background_color": "#f8fafc",
   "theme_color": "#4f46e5",
   "lang": "it",
   "dir": "ltr",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nuova trascrizione",
+      "short_name": "Nuova",
+      "description": "Trascrivi subito un nuovo audio",
+      "url": "./?action=new",
+      "icons": [{ "src": "icons/shortcut-new.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Cronologia",
+      "short_name": "Cronologia",
+      "description": "Apri le trascrizioni salvate",
+      "url": "./?action=history",
+      "icons": [{ "src": "icons/shortcut-history.png", "sizes": "96x96", "type": "image/png" }]
+    }
+  ],
+  "screenshots": [
+    { "src": "screenshots/wide-1280x720.png", "sizes": "1280x720", "type": "image/png", "form_factor": "wide" },
+    { "src": "screenshots/narrow-540x960.png", "sizes": "540x960", "type": "image/png", "form_factor": "narrow" }
+  ],
   "share_target": {
     "action": "./share-target.html",
     "method": "POST",
     "enctype": "multipart/form-data",
     "params": {
       "files": [
-        {
-          "name": "audio",
-          "accept": ["audio/*", ".ogg", ".opus", ".m4a", ".mp3", ".wav", ".aac"]
-        }
+        { "name": "audio", "accept": ["audio/*", ".ogg", ".opus", ".m4a", ".mp3", ".wav", ".aac"] }
       ]
     }
-  },
-  "icons": [
-    {
-      "src": "icons/icon-192.png",
-      "type": "image/png",
-      "sizes": "192x192",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-512.png",
-      "type": "image/png",
-      "sizes": "512x512",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-maskable-512.png",
-      "type": "image/png",
-      "sizes": "512x512",
-      "purpose": "maskable"
-    },
-    {
-      "src": "icon-light.svg",
-      "type": "image/svg+xml",
-      "sizes": "any",
-      "purpose": "any"
-    },
-    {
-      "src": "icon-dark.svg",
-      "type": "image/svg+xml",
-      "sizes": "any",
-      "purpose": "any",
-      "media": "(prefers-color-scheme: dark)"
-    },
-    {
-      "src": "icon-dark-transparent.svg",
-      "type": "image/svg+xml",
-      "sizes": "any",
-      "purpose": "maskable"
-    }
-  ],
-  "shortcuts": [
-    {
-      "name": "Nuova trascrizione",
-      "short_name": "Nuova",
-      "description": "Apri SoundScript e scegli subito un audio da trascrivere",
-      "url": "./?action=new",
-      "icons": [
-        { "src": "icons/shortcut-new.png", "sizes": "96x96", "type": "image/png" }
-      ]
-    },
-    {
-      "name": "Cronologia",
-      "short_name": "Cronologia",
-      "description": "Apri SoundScript con la cronologia già espansa",
-      "url": "./?action=history",
-      "icons": [
-        { "src": "icons/shortcut-history.png", "sizes": "96x96", "type": "image/png" }
-      ]
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "screenshots/wide-1280x720.png",
-      "sizes": "1280x720",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "Trascrizione e riepilogo su desktop"
-    },
-    {
-      "src": "screenshots/narrow-540x960.png",
-      "sizes": "540x960",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Trascrizione su telefono"
-    }
-  ]
+  }
 }
