@@ -544,8 +544,25 @@ function loadHistory() {
   catch { return []; }
 }
 function saveHistoryList(items) {
-  localStorage.setItem("vtt-history", JSON.stringify(items.slice(0, 20)));
+  /* Guardia anti-quota: se lo storage è pieno, sfoltisci le voci più vecchie e riprova */
+  const toSave = items.slice(0, 20);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      localStorage.setItem("vtt-history", JSON.stringify(toSave));
+      return;
+    } catch (err) {
+      const quota = err && (err.name === "QuotaExceededError" ||
+        err.name === "NS_ERROR_DOM_QUOTA_REACHED" || err.code === 22);
+      if (quota && toSave.length > 1) {
+        toSave.pop(); /* le voci sono ordinate dalla più recente: pop toglie la più vecchia */
+        continue;
+      }
+      console.warn("Salvataggio cronologia non riuscito:", err);
+      return;
+    }
+  }
 }
+
 function pushHistoryEntry() {
   try {
     const transcript = ($("#txt") && $("#txt").value) || "";
