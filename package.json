@@ -1,6 +1,6 @@
 {
   "name": "soundscript",
-  "version": "1.2",
+  "version": "1.2.1",
   "description": "Turn WhatsApp voice notes into text and TL;DR summaries, entirely in your browser.",
   "private": true,
   "type": "module",
