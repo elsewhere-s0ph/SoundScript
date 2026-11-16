@@ -1,0 +1,52 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Controlli PWA
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dipendenze
+        run: npm install --no-audit --no-fund
+
+      - name: Build di prova
+        run: npm run build
+
+      - name: Controlli strutturali
+        run: node scripts/check.mjs
+
+      - name: Individua Chrome
+        run: echo "CHROME_PATH=$(command -v google-chrome-stable || command -v google-chrome)" >> "$GITHUB_ENV"
+
+      - name: Lighthouse CI
+        run: npx --yes @lhci/cli@0.14.x autorun --config=lighthouserc.json
+
+      - name: Pubblica i report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-pwa
+          path: .lighthouseci
+          retention-days: 14
+          if-no-files-found: ignore
