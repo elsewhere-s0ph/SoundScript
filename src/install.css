@@ -1,0 +1,212 @@
+/* ===== SoundScript · Banner installazione + guida iOS + riga Info =====
+   Usa i token del design system dell'app (definiti in style.css).
+   Nessun selettore esistente viene sovrascritto. */
+
+.ss-install,
+.ss-guide{
+  position:fixed;
+  left:50%;
+  bottom:calc(var(--space-lg, 28px) + env(safe-area-inset-bottom, 0px));
+  width:min(440px, calc(100vw - 24px));
+  transform:translate(-50%, 140%);
+  opacity:0;
+  z-index:1090;
+  padding:var(--space-md, 20px);
+  background:var(--sc-lowest, #fff);
+  border:1px solid var(--outline-variant, #e2e8f0);
+  border-radius:var(--radius-xl, 24px);
+  box-shadow:
+    0 24px 60px -18px rgba(15, 23, 42, .32),
+    0 2px 8px rgba(15, 23, 42, .06),
+    0 0 0 1px color-mix(in srgb, var(--primary, #4f46e5) 10%, transparent);
+  overflow:hidden;
+  transition:transform .5s var(--ease, cubic-bezier(.34,1.56,.64,1)), opacity .3s ease, bottom .3s ease;
+}
+.ss-install.show,
+.ss-guide.show{ transform:translate(-50%, 0); opacity:1; }
+.ss-install.lifted,
+.ss-guide.lifted{ bottom:calc(var(--space-lg, 28px) + 132px + env(safe-area-inset-bottom, 0px)); }
+
+/* alone decorativo indaco→ciano */
+.ss-install-aura{
+  position:absolute;
+  top:-70px; right:-60px;
+  width:190px; height:190px;
+  border-radius:50%;
+  pointer-events:none;
+  background:radial-gradient(circle at 50% 50%,
+    color-mix(in srgb, var(--secondary, #06b6d4) 42%, transparent) 0%,
+    color-mix(in srgb, var(--primary, #4f46e5) 26%, transparent) 45%,
+    transparent 72%);
+  filter:blur(6px);
+  opacity:.5;
+}
+
+.ss-install-head{ position:relative; display:flex; align-items:flex-start; gap:var(--space-sm, 12px); }
+
+.ss-install-icon{
+  width:44px; height:44px; flex:none;
+  display:grid; place-items:center;
+  border-radius:14px;
+  color:#fff;
+  background:linear-gradient(135deg, var(--primary, #4f46e5), var(--secondary, #06b6d4));
+  box-shadow:0 6px 16px -6px color-mix(in srgb, var(--primary, #4f46e5) 70%, transparent);
+}
+.ss-install-icon svg{ width:22px; height:22px; }
+.ss-install-icon.ios{
+  background:linear-gradient(135deg, var(--secondary, #06b6d4), var(--primary, #4f46e5));
+}
+
+.ss-install-text{ flex:1 1 auto; min-width:0; }
+.ss-install-title{
+  margin:0 0 3px;
+  font:600 .9375rem/1.3 "Roboto Flex", system-ui, sans-serif;
+  color:var(--on-surface, #0f172a);
+}
+.ss-install-desc{
+  margin:0;
+  font-size:.8125rem;
+  line-height:1.45;
+  color:var(--on-surface-variant, #64748b);
+}
+
+.ss-install-close{
+  width:28px; height:28px; flex:none;
+  display:grid; place-items:center;
+  border:0; border-radius:999px;
+  background:color-mix(in srgb, var(--on-surface, #0f172a) 7%, transparent);
+  color:var(--on-surface-variant, #64748b);
+  cursor:pointer;
+  transition:background-color .2s, color .2s;
+  -webkit-tap-highlight-color:transparent;
+}
+.ss-install-close:hover{
+  background:color-mix(in srgb, var(--on-surface, #0f172a) 14%, transparent);
+  color:var(--on-surface, #0f172a);
+}
+.ss-install-close svg{ width:14px; height:14px; }
+.ss-install-close:focus-visible{ outline:2px solid var(--primary, #4f46e5); outline-offset:2px; }
+
+.ss-install-actions{
+  position:relative;
+  display:flex;
+  gap:var(--space-xs, 6px);
+  margin-top:var(--space-md, 20px);
+}
+.ss-install-btn{
+  flex:1 1 0;
+  min-height:42px;
+  padding:0 16px;
+  border:0;
+  border-radius:999px;
+  font:600 .875rem/1 "Roboto Flex", system-ui, sans-serif;
+  cursor:pointer;
+  transition:background-color .2s, transform .15s var(--ease, cubic-bezier(.34,1.56,.64,1));
+  -webkit-tap-highlight-color:transparent;
+  white-space:nowrap;
+}
+.ss-install-btn:active{ transform:scale(.97); }
+.ss-install-btn:focus-visible{ outline:2px solid var(--primary, #4f46e5); outline-offset:2px; }
+.ss-install-btn.primary{
+  background:var(--primary, #4f46e5);
+  color:var(--on-primary, #fff);
+}
+.ss-install-btn.primary:hover{ background:var(--primary-hover, #4338ca); }
+.ss-install-btn.ghost{
+  background:color-mix(in srgb, var(--on-surface, #0f172a) 8%, transparent);
+  color:var(--on-surface, #0f172a);
+}
+.ss-install-btn.ghost:hover{ background:color-mix(in srgb, var(--on-surface, #0f172a) 14%, transparent); }
+
+/* ===== guida iOS ===== */
+.ss-guide-steps{
+  position:relative;
+  list-style:none;
+  margin:var(--space-md, 20px) 0 0;
+  padding:0;
+  display:grid;
+  gap:8px;
+  max-height:min(38vh, 240px);
+  overflow:auto;
+  scrollbar-width:thin;
+  scrollbar-color:color-mix(in srgb, var(--primary, #4f46e5) 55%, transparent) transparent;
+}
+.ss-guide-steps::-webkit-scrollbar{ width:8px; }
+.ss-guide-steps::-webkit-scrollbar-track{
+  background:color-mix(in srgb, var(--on-surface, #0f172a) 6%, transparent);
+  border-radius:999px;
+}
+.ss-guide-steps::-webkit-scrollbar-thumb{
+  background:color-mix(in srgb, var(--primary, #4f46e5) 55%, transparent);
+  border-radius:999px;
+}
+.ss-guide-steps::-webkit-scrollbar-thumb:hover{
+  background:var(--primary, #4f46e5);
+}
+.ss-guide-steps li{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:9px 12px;
+  border-radius:var(--radius-md, 12px);
+  background:color-mix(in srgb, var(--primary, #4f46e5) 6%, transparent);
+  border:1px solid color-mix(in srgb, var(--primary, #4f46e5) 14%, transparent);
+}
+.ss-guide-n{
+  width:22px; height:22px; flex:none;
+  display:grid; place-items:center;
+  border-radius:999px;
+  font:700 .75rem/1 "Roboto Flex", system-ui, sans-serif;
+  color:#fff;
+  background:linear-gradient(135deg, var(--primary, #4f46e5), var(--secondary, #06b6d4));
+}
+.ss-guide-t{
+  font-size:.8125rem;
+  line-height:1.5;
+  color:var(--on-surface, #0f172a);
+}
+.ss-guide-t b{ font-weight:700; color:var(--primary, #4f46e5); }
+.ss-guide-note{
+  position:relative;
+  margin:var(--space-sm, 12px) 0 0;
+  padding:9px 12px;
+  border-radius:var(--radius-md, 12px);
+  font-size:.75rem;
+  line-height:1.5;
+  color:var(--on-warning-container, #92400e);
+  background:var(--warning-container, #fef3c7);
+  border:1px solid color-mix(in srgb, var(--warning, #f59e0b) 32%, transparent);
+}
+.ss-guide-note b{ font-weight:700; }
+
+/* ===== riga nelle Info ===== */
+[data-ss-install-row] .hbadge{ flex:none; }
+[data-ss-install-row] .btn{ flex:none; min-height:38px; padding:0 16px; font-size:.8125rem; }
+
+/* ===== mobile ===== */
+@media (max-width:520px){
+  .ss-install,
+  .ss-guide{
+    left:12px;
+    right:12px;
+    width:auto;
+    transform:translateY(150%);
+    padding:var(--space-sm, 12px) var(--space-sm, 12px) var(--space-md, 20px);
+    border-radius:var(--radius-lg, 16px);
+  }
+  .ss-install.show,
+  .ss-guide.show{ transform:translateY(0); }
+  .ss-install.lifted,
+  .ss-guide.lifted{ bottom:calc(var(--space-lg, 28px) + 150px + env(safe-area-inset-bottom, 0px)); }
+  .ss-install-icon{ width:40px; height:40px; border-radius:12px; }
+  .ss-install-icon svg{ width:20px; height:20px; }
+  .ss-install-title{ font-size:.875rem; }
+  .ss-install-desc{ font-size:.75rem; }
+  .ss-install-btn{ min-height:44px; font-size:.8125rem; padding:0 12px; }
+  [data-ss-install-row]{ flex-direction:column; align-items:flex-start; gap:8px; }
+  [data-ss-install-row] .btn{ width:100%; }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .ss-install, .ss-guide, .ss-install-btn{ transition:none !important; }
+}
