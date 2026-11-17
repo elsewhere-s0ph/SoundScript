@@ -2,7 +2,9 @@
    Modulo autonomo: accordion "Sostieni il progetto" come ULTIMO elemento
    dell'area Info + micro-riga nel footer dell'app che lo apre.
    Non modifica main.js né i18n.js: clona la struttura dell'accordion
-   esistente per ereditare classi, chevron e animazioni già in uso.
+   esistente per ereditare classi, chevron e animazioni già in uso,
+   poi sostituisce l'icona ereditata con la tazzina.
+   La card interna è solo testo + Ko-fi: nessuna icona ripetuta.
    Solo link esterno: nessuno script di terze parti, CSP invariato. */
 
 import "./support.css";
@@ -61,14 +63,13 @@ function announce(msg) {
   setTimeout(() => { live.textContent = msg; }, 40);
 }
 
-/* ---------- card ---------- */
+/* ---------- card: solo testo, Ko-fi, nota e badge ---------- */
 function buildCard() {
   const box = document.createElement("div");
   box.className = "ss-support";
   box.innerHTML =
     '<span class="ss-support-aura" aria-hidden="true"></span>' +
     '<div class="ss-support-head">' +
-      '<span class="ss-support-ico" aria-hidden="true">' + ICON_CUP + '</span>' +
       '<div class="ss-support-text">' +
         '<p class="ss-support-title"></p>' +
         '<p class="ss-support-desc"></p>' +
@@ -111,6 +112,16 @@ function retitle(summary, label) {
   if (summary.hasAttribute("aria-label")) summary.setAttribute("aria-label", label);
 }
 
+/* ---------- icona dell'accordion: tazzina al posto dell'ereditata ---------- */
+function resymbol(summary) {
+  if (!summary) return;
+  const holder = summary.querySelector(".si, .faq-ico, .summary-ico");
+  if (holder) {
+    holder.innerHTML = ICON_CUP;
+    holder.setAttribute("aria-hidden", "true");
+  }
+}
+
 /* ---------- accordion: ultimo dell'area Info ---------- */
 function mountAccordion() {
   const info = document.getElementById("faqInfo");
@@ -124,7 +135,9 @@ function mountAccordion() {
   node.id = FAQ_ID;
   node.removeAttribute("open");
 
-  retitle(node.querySelector("summary"), T("sum"));
+  const summary = node.querySelector("summary");
+  retitle(summary, T("sum"));
+  resymbol(summary);
 
   let body = node.querySelector(".faq-body");
   if (!body) {
@@ -134,8 +147,7 @@ function mountAccordion() {
   if (!body) { node.remove(); return null; }
 
   if (body.id) {
-    const sum = node.querySelector("summary");
-    if (sum && sum.getAttribute("aria-controls") === body.id) sum.setAttribute("aria-controls", BODY_ID);
+    if (summary && summary.getAttribute("aria-controls") === body.id) summary.setAttribute("aria-controls", BODY_ID);
     body.id = BODY_ID;
   }
   body.innerHTML = "";

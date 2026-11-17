@@ -1,5 +1,6 @@
 /* ===== SoundScript · card sostegno + micro-riga footer =====
    Usa i token del design system dell'app, con fallback.
+   L'icona vive sull'accordion (stile .si dell'app): la card è solo testo.
    Nessun selettore esistente viene sovrascritto. */
 
 .ss-support{
@@ -26,28 +27,18 @@
     transparent 72%);
 }
 
-.ss-support-head{ position:relative; display:flex; align-items:flex-start; gap:var(--space-sm, 12px); }
+.ss-support-head{ position:relative; }
 
-.ss-support-ico{
-  width:40px; height:40px; flex:none;
-  display:grid; place-items:center;
-  border-radius:12px;
-  color:#fff;
-  background:linear-gradient(135deg, var(--primary, #4f46e5), var(--secondary, #06b6d4));
-  box-shadow:0 6px 16px -6px color-mix(in srgb, var(--primary, #4f46e5) 70%, transparent);
-}
-.ss-support-ico svg{ width:21px; height:21px; }
-
-.ss-support-text{ flex:1 1 auto; min-width:0; }
+.ss-support-text{ min-width:0; }
 .ss-support-title{
-  margin:0 0 3px;
+  margin:0 0 4px;
   font:600 .9375rem/1.3 "Roboto Flex", system-ui, sans-serif;
   color:var(--on-surface, #0f172a);
 }
 .ss-support-desc{
   margin:0;
   font-size:.8125rem;
-  line-height:1.5;
+  line-height:1.55;
   color:var(--on-surface-variant, #64748b);
 }
 
@@ -126,8 +117,6 @@
 
 /* ===== mobile ===== */
 @media (max-width:520px){
-  .ss-support-ico{ width:36px; height:36px; border-radius:11px; }
-  .ss-support-ico svg{ width:19px; height:19px; }
   .ss-support-title{ font-size:.875rem; }
   .ss-support-desc{ font-size:.75rem; }
   .ss-support-btn{ font-size:.8125rem; padding:0 12px; }
