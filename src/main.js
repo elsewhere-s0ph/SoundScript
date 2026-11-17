@@ -340,16 +340,18 @@ if ("serviceWorker" in navigator) {
       showInfoToast(T("toastNewTitle"), T("toastNewDesc"));
     }
   });
-  window.addEventListener("load", async () => {
+  /* Registrazione immediata: non aspettiamo window.load, così il service worker
+     è pronto a intercettare una condivisione il prima possibile. */
+  swHadController = !!navigator.serviceWorker.controller;
+  (async () => {
     try {
-      swHadController = !!navigator.serviceWorker.controller;
       const reg = await navigator.serviceWorker.register("./sw.js");
       swReg = reg;
       try { await reg.update(); } catch (e) {}
     } catch (error) {
       console.error("SW registration failed:", error);
     }
-  });
+  })();
 }
 
 /* ===== Formattazioni ===== */
@@ -2608,25 +2610,64 @@ async function copyText(text) {
 }
 
 async function loadShared() {
+  /* Una sola esecuzione per sessione: un cambio lingua non deve rileggere
+     una condivisione già consumata. */
+  if (loadShared._running) return;
+
   const params = new URLSearchParams(location.search);
-  if (params.has("share-error")) { history.replaceState({}, "", location.pathname); stat(T("stShareCant"), 0); return; }
+  const cleanUrl = () => history.replaceState({}, "", location.pathname);
+
+  if (params.has("share-error")) { cleanUrl(); stat(T("stShareCant"), 0); return; }
   if (params.get("shared") !== "1") return;
+
+  loadShared._running = true;
+  const waitMsg = LANG === "it" ? "Recupero l'audio condiviso…" : "Fetching the shared audio…";
+  const retryMsg = LANG === "it"
+    ? "Audio non ancora pronto: ricarica la pagina per recuperarlo."
+    : "Audio not ready yet: reload the page to recover it.";
+
   try {
     if (!("caches" in window)) throw new Error("cache unavailable");
+    const key = new URL("shared-audio", document.baseURI).href;
     const cache = await caches.open(SHARE_CACHE);
-    const audioUrlShared = new URL("shared-audio", document.baseURI).href;
-    const response = await cache.match(audioUrlShared);
-    if (!response) { stat(T("stShareNotFound"), 0); return; }
+
+    /* Attesa con retry: copre la gara tra la scrittura del service worker
+       e la lettura della pagina, che prima non veniva attesa affatto. */
+    stat(waitMsg, 5);
+    let response = null;
+    for (let i = 0; i < 12 && !response; i++) {
+      response = await cache.match(key);
+      if (!response) await sleep(300);
+    }
+    if (!response) {
+      cleanUrl();
+      stat(T("stShareNotFound"), 0);
+      return;
+    }
+
     const blob = await response.blob();
     const encoded = response.headers.get("X-SoundScript-Filename") || "audio";
     let filename = "audio";
     try { filename = decodeURIComponent(encoded); } catch { filename = "audio"; }
-    await cache.delete(audioUrlShared);
-    history.replaceState({}, "", location.pathname);
-    await process(new File([blob], filename, { type: blob.type || "audio/ogg" }));
+    const file = new File([blob], filename, { type: blob.type || "audio/ogg" });
+
+    /* Marcatore di successo: showTranscript() aggiorna lastProcessDate,
+       quindi un valore più recente significa trascrizione riuscita. */
+    const stampBefore = lastProcessDate ? lastProcessDate.getTime() : 0;
+    await process(file);
+    const stampAfter = lastProcessDate ? lastProcessDate.getTime() : 0;
+    const done = stampAfter > stampBefore;
+
+    /* L'audio si cancella SOLO a trascrizione riuscita: se la catena fallisce,
+       resta in cache e un reload lo recupera senza dover ricondividere. */
+    if (done) {
+      try { await cache.delete(key); } catch (e) {}
+      cleanUrl();
+    } else {
+      stat(retryMsg, 0);
+    }
   } catch (error) {
     console.error("Shared audio error:", error);
-    history.replaceState({}, "", location.pathname);
     stat(T("stShareErr"), 0);
   }
 }
