@@ -1,0 +1,151 @@
+/* ===== SoundScript · crediti footer + voce FAQ "Vuoi saperne di più?" =====
+   Usa i token del design system dell'app, con fallback.
+   Nessun selettore esistente viene sovrascritto. */
+
+.ss-ext{ font-size:.85em; opacity:.75; flex:none; }
+
+/* ===== blocco footer ===== */
+.ss-credits{
+  padding:0 var(--space-xs, 6px) calc(var(--space-sm, 12px) + env(safe-area-inset-bottom, 0px));
+  text-align:center;
+}
+
+.ss-credits-rule{
+  border:0;
+  height:1px;
+  width:min(220px, 60%);
+  margin:0 auto var(--space-sm, 12px);
+  background:var(--outline-variant, #e2e8f0);
+}
+
+.ss-credits-line{
+  margin:0;
+  font-size:.75rem;
+  line-height:1.6;
+  color:var(--on-surface-variant, #64748b);
+}
+
+.ss-credits-studio{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:2px 1px;
+  color:var(--on-surface, #0f172a);
+  font-weight:600;
+  text-decoration:none;
+  border-bottom:1px solid color-mix(in srgb, var(--primary, #4f46e5) 45%, transparent);
+  transition:color .2s, border-color .2s;
+  -webkit-tap-highlight-color:transparent;
+}
+.ss-credits-studio:hover{
+  color:var(--primary, #4f46e5);
+  border-bottom-color:var(--primary, #4f46e5);
+}
+.ss-credits-studio:focus-visible{
+  outline:2px solid var(--primary, #4f46e5);
+  outline-offset:3px;
+  border-radius:3px;
+}
+
+.ss-credits-pillwrap{ margin:var(--space-xs, 6px) 0 0; }
+
+.ss-credits-pill{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  min-height:40px;
+  padding:0 15px;
+  border-radius:999px;
+  border:1px solid var(--outline-variant, #e2e8f0);
+  background:var(--sc-lowest, #fff);
+  font:600 .75rem/1 "Roboto Flex", system-ui, sans-serif;
+  color:var(--on-surface, #0f172a);
+  text-decoration:none;
+  transition:border-color .2s, color .2s, background-color .2s;
+  -webkit-tap-highlight-color:transparent;
+}
+.ss-credits-pill:hover{
+  border-color:color-mix(in srgb, var(--primary, #4f46e5) 50%, transparent);
+  color:var(--primary, #4f46e5);
+  background:color-mix(in srgb, var(--primary, #4f46e5) 7%, var(--sc-lowest, #fff));
+}
+.ss-credits-pill:focus-visible{
+  outline:2px solid var(--primary, #4f46e5);
+  outline-offset:2px;
+}
+.ss-credits-pill svg{ width:14px; height:14px; flex:none; }
+
+/* ===== voce FAQ ===== */
+.ss-more-lead{
+  margin:0 0 var(--space-sm, 12px);
+  font-size:.8125rem;
+  line-height:1.6;
+  color:var(--on-surface-variant, #64748b);
+}
+
+.ss-more-btn{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  width:100%;
+  min-height:44px;
+  padding:0 16px;
+  border:0;
+  border-radius:999px;
+  font:600 .875rem/1 "Roboto Flex", system-ui, sans-serif;
+  text-decoration:none;
+  cursor:pointer;
+  color:var(--on-primary, #fff);
+  background:var(--primary, #4f46e5);
+  transition:background-color .2s, transform .15s var(--ease, cubic-bezier(.34,1.56,.64,1));
+  -webkit-tap-highlight-color:transparent;
+}
+.ss-more-btn:hover{ background:var(--primary-hover, #4338ca); }
+.ss-more-btn:active{ transform:scale(.98); }
+.ss-more-btn:focus-visible{ outline:2px solid var(--primary, #4f46e5); outline-offset:2px; }
+.ss-more-btn svg{ width:16px; height:16px; flex:none; }
+.ss-more-btn-label{ min-width:0; }
+
+.ss-more-alt{
+  margin:var(--space-xs, 6px) 0 0;
+  text-align:center;
+  font-size:.75rem;
+  line-height:1.5;
+}
+.ss-more-alt-link{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:8px 6px;
+  color:var(--on-surface-variant, #64748b);
+  text-decoration:none;
+  border-bottom:1px solid color-mix(in srgb, var(--primary, #4f46e5) 40%, transparent);
+  transition:color .2s, border-color .2s;
+  -webkit-tap-highlight-color:transparent;
+}
+.ss-more-alt-link:hover{
+  color:var(--primary, #4f46e5);
+  border-bottom-color:var(--primary, #4f46e5);
+}
+.ss-more-alt-link:focus-visible{
+  outline:2px solid var(--primary, #4f46e5);
+  outline-offset:2px;
+  border-radius:3px;
+}
+
+/* ===== mobile ===== */
+@media (max-width:520px){
+  .ss-credits-line{ font-size:.7rem; }
+  .ss-credits-pill{ min-height:42px; font-size:.7rem; padding:0 13px; }
+  .ss-more-lead{ font-size:.75rem; }
+  .ss-more-btn{ font-size:.8125rem; padding:0 12px; }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .ss-credits-studio,
+  .ss-credits-pill,
+  .ss-more-btn,
+  .ss-more-alt-link{ transition:none !important; }
+}
