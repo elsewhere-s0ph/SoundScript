@@ -27,8 +27,13 @@ jobs:
         with:
           node-version: "20"
 
+      # --ignore-scripts: onnxruntime-node e sharp scaricano binari nativi
+      # (CUDA/CPU) che alla build browser non servono: Vite usa onnxruntime-web.
+      # Il postinstall di onnxruntime-node cerca un archivio GPU inesistente (404).
+      # esbuild risolve il proprio binario dalle optionalDependencies, quindi
+      # la build di Vite funziona anche senza script di installazione.
       - name: Install dipendenze
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --ignore-scripts
 
       - name: Build di prova
         run: npm run build
