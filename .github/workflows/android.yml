@@ -18,7 +18,7 @@ jobs:
   build:
     name: TWA · build, gate, artifact
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,44 +34,66 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # Nessuna action di terze parti per l'SDK: ubuntu-latest lo include già.
-      # android-actions/setup-android@v3 tenta di installare il pacchetto legacy
-      # "tools", rimosso da Google nel 2021, e sdkmanager esce con codice 1.
-      - name: Android SDK · verifica e componenti
+      # packages esplicito: il default dell'action è 'tools platform-tools' e
+      # 'tools' è stato ritirato da Google nel 2021 → sdkmanager exit 1.
+      # Qui chiediamo solo ciò che serve, e l'action costruisce un SDK nella
+      # forma che bubblewrap si aspetta.
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      # bubblewrap valida la FORMA dell'SDK: vuole cmdline-tools/latest.
+      # Le immagini del runner hanno cartelle versionate (es. 16.0) e il
+      # symlink latest può mancare: "The provided androidSdk isn't correct."
+      - name: SDK · forma, pacchetti, diagnosi
         run: |
           set -e
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
-          if [ ! -d "$SDK" ]; then
-            echo "::error::Android SDK non trovato in $SDK"
-            exit 1
-          fi
+          [ -d "$SDK" ] || { echo "::error::SDK non trovato in $SDK"; exit 1; }
           echo "SDK root: $SDK"
 
-          SDKMAN=""
-          for c in "$SDK/cmdline-tools/latest/bin/sdkmanager" "$SDK"/cmdline-tools/*/bin/sdkmanager; do
-            if [ -x "$c" ]; then SDKMAN="$c"; break; fi
-          done
-          if [ -z "$SDKMAN" ]; then
-            echo "::error::sdkmanager non trovato sotto $SDK/cmdline-tools"
-            ls -la "$SDK" || true
-            exit 1
+          mkdir -p "$SDK/cmdline-tools"
+          if [ ! -e "$SDK/cmdline-tools/latest" ]; then
+            VER=$(ls -1 "$SDK/cmdline-tools" 2>/dev/null | grep -v '^latest$' | sort -V | tail -1 || true)
+            if [ -n "$VER" ] && [ -d "$SDK/cmdline-tools/$VER" ]; then
+              ln -sfn "$SDK/cmdline-tools/$VER" "$SDK/cmdline-tools/latest"
+              echo "Symlink latest -> $VER creato."
+            else
+              echo "::error::Nessuna cartella cmdline-tools versionata da collegare a latest."
+              ls -la "$SDK/cmdline-tools" || true
+              exit 1
+            fi
+          else
+            echo "cmdline-tools/latest già presente."
           fi
-          echo "sdkmanager: $SDKMAN"
+
+          SDKMAN="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMAN" ] || { echo "::error::sdkmanager non eseguibile in $SDKMAN"; exit 1; }
 
           yes 2>/dev/null | "$SDKMAN" --sdk_root="$SDK" --licenses >/dev/null 2>&1 || true
           "$SDKMAN" --sdk_root="$SDK" --install \
             "platform-tools" \
             "platforms;android-${ANDROID_API}" \
-            "build-tools;${ANDROID_BUILD_TOOLS}"
+            "build-tools;${ANDROID_BUILD_TOOLS}" >/dev/null
 
-          test -d "$SDK/platforms/android-${ANDROID_API}" || { echo "::error::platform android-${ANDROID_API} assente"; exit 1; }
-          test -d "$SDK/build-tools/${ANDROID_BUILD_TOOLS}" || { echo "::error::build-tools ${ANDROID_BUILD_TOOLS} assente"; exit 1; }
+          for p in "platform-tools" "platforms/android-${ANDROID_API}" "build-tools/${ANDROID_BUILD_TOOLS}" "cmdline-tools/latest"; do
+            if [ -e "$SDK/$p" ]; then echo "OK   $p"; else echo "::error::manca $p"; exit 1; fi
+          done
+
+          echo "--- forma dell'SDK ---"
+          ls -1 "$SDK"
+          echo "--- cmdline-tools ---"
+          ls -la "$SDK/cmdline-tools"
+          echo "--- build-tools ---"
+          ls -1 "$SDK/build-tools"
+          echo "--- platforms ---"
+          ls -1 "$SDK/platforms"
 
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           echo "$SDK/platform-tools" >> "$GITHUB_PATH"
           echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "Componenti SDK pronti."
 
       - name: Verifica prerequisiti del repo
         run: |
@@ -80,19 +102,29 @@ jobs:
           test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" || { echo "::error::Secret ANDROID_KEYSTORE_BASE64 mancante"; exit 1; }
           test -n "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" || { echo "::error::Secret ANDROID_KEYSTORE_PASSWORD mancante"; exit 1; }
           test -n "${{ secrets.ANDROID_KEY_PASSWORD }}" || { echo "::error::Secret ANDROID_KEY_PASSWORD mancante"; exit 1; }
-          node -e "const m=require('./twa-manifest.json'); if(!m.shareTarget){console.error('::error::twa-manifest.json senza shareTarget: il pacchetto non avrebbe il consegnatario');process.exit(1)} if(m.shareTarget.method!=='POST'){console.error('::error::shareTarget.method deve essere POST');process.exit(1)} console.log('shareTarget dichiarato:', m.shareTarget.action)"
+          node -e "const m=require('./twa-manifest.json'); if(!m.shareTarget){console.error('::error::twa-manifest.json senza shareTarget');process.exit(1)} if(m.shareTarget.method!=='POST'){console.error('::error::shareTarget.method deve essere POST');process.exit(1)} console.log('shareTarget:', m.shareTarget.action, '· alias:', (m.signingKey&&m.signingKey.alias)||'(assente)')"
 
-      # Il keystore viene solo decodificato dai Secrets. Non viene generato qui
-      # e non finisce negli artifact: su un repo pubblico sarebbero leggibili
-      # da chiunque, e la chiave di firma è l'identità dell'app.
       - name: Ricostruisci il keystore
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          printf '%s' "$KS_B64" | base64 -d > android.keystore
+          set -u
+          CLEAN=$(printf '%s' "$KS_B64" | tr -d '[:space:]')
+          printf '%s' "$CLEAN" | base64 -d > android.keystore
           chmod 600 android.keystore
-          keytool -list -keystore android.keystore -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >/dev/null
-          echo "Keystore valido."
+          SIZE=$(wc -c < android.keystore | tr -d ' ')
+          echo "keystore: $SIZE byte · magic $(od -An -tx1 -N4 android.keystore | tr -d ' \n')"
+          OPENED=""
+          for T in PKCS12 JKS JCEKS; do
+            if keytool -list -keystore android.keystore -storetype "$T" -storepass "$KS_PASS" >/dev/null 2>/tmp/kterr; then
+              OPENED="$T"; echo "aperto come $T"; break
+            fi
+          done
+          if [ -z "$OPENED" ]; then
+            echo "::error::keystore non apribile. stderr:"; head -8 /tmp/kterr; exit 1
+          fi
+          echo "ANDROID_KEYSTORE_TYPE=$OPENED" >> "$GITHUB_ENV"
 
       - name: Installa Bubblewrap
         run: npm install --no-audit --no-fund --ignore-scripts -g @bubblewrap/cli
@@ -100,13 +132,16 @@ jobs:
       - name: Configura Bubblewrap
         run: |
           mkdir -p "$HOME/.bubblewrap"
-          cat > "$HOME/.bubblewrap/config.json" <<EOF
-          {
-            "jdkPath": "$JAVA_HOME",
-            "androidSdkPath": "$ANDROID_SDK_ROOT"
-          }
-          EOF
+          printf '{\n  "jdkPath": "%s",\n  "androidSdkPath": "%s"\n}\n' \
+            "$JAVA_HOME" "$ANDROID_SDK_ROOT" > "$HOME/.bubblewrap/config.json"
           cat "$HOME/.bubblewrap/config.json"
+          node -e "JSON.parse(require('fs').readFileSync(process.env.HOME+'/.bubblewrap/config.json','utf8'));console.log('config.json valido')"
+
+      # Non bloccante: stampa cosa bubblewrap pensa dell'SDK, così se build
+      # fallisce abbiamo già la diagnosi invece di un messaggio generico.
+      - name: Bubblewrap doctor
+        continue-on-error: true
+        run: bubblewrap doctor
 
       - name: Build APK e AAB
         env:
@@ -114,9 +149,6 @@ jobs:
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: bubblewrap build --skipPwaValidation
 
-      # GATE: il pacchetto precedente aveva ACTION_SEND e audio/* ma non
-      # ShareTargetActivity, quindi WhatsApp mostrava l'app e il file andava
-      # perso. Senza questo controllo il difetto si ripete in silenzio.
       - name: Gate · consegna condivisione
         run: node scripts/verify-apk.mjs app-release-signed.apk
 
@@ -125,7 +157,8 @@ jobs:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           echo "Fingerprint SHA-256 (deve coincidere con assetlinks.json):"
-          keytool -list -v -keystore android.keystore -storepass "$KS_PASS" \
+          keytool -list -v -keystore android.keystore \
+            -storetype "${ANDROID_KEYSTORE_TYPE:-PKCS12}" -storepass "$KS_PASS" \
             | grep -A1 "SHA256:" || true
 
       - name: Rimuovi il keystore dal workspace
