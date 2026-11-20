@@ -76,12 +76,6 @@ jobs:
           test -n "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" || { echo "::error::Secret ANDROID_KEYSTORE_PASSWORD mancante"; exit 1; }
           test -n "${{ secrets.ANDROID_KEY_PASSWORD }}" || { echo "::error::Secret ANDROID_KEY_PASSWORD mancante"; exit 1; }
 
-      # androidbrowserhelper 2.7.4 dichiara minSdk 24. Con 21 il manifest
-      # merger si ferma: "uses-sdk:minSdkVersion 21 cannot be smaller than
-      # version 24 declared in library". Allineiamo il manifest prima che
-      # bubblewrap generi il progetto, così il valore è giusto alla nascita.
-      # tools:overrideLibrary non è un'alternativa: forzerebbe l'uso di API
-      # non presenti su Android 5/6, con crash a runtime.
       - name: Allinea minSdkVersion al vincolo della libreria
         run: |
           node -e "
@@ -99,13 +93,7 @@ jobs:
             }
             if (!m.shareTarget) { console.error('::error::twa-manifest.json senza shareTarget'); process.exit(1); }
             if (m.shareTarget.method !== 'POST') { console.error('::error::shareTarget.method deve essere POST'); process.exit(1); }
-            console.log('shareTarget: ' + m.shareTarget.action + ' · versionCode: ' + m.appVersionCode);
-          "
-          node -e "
-            const m = require('./twa-manifest.json');
-            const MIN = parseInt(process.env.ANDROID_MIN_SDK, 10);
-            if (m.minSdkVersion < MIN) { console.error('::error::minSdkVersion ancora ' + m.minSdkVersion); process.exit(1); }
-            console.log('Vincolo soddisfatto: minSdk ' + m.minSdkVersion + ' (Android ' + (m.minSdkVersion === 24 ? '7.0' : m.minSdkVersion) + '+)');
+            console.log('shareTarget: ' + m.shareTarget.action);
           "
 
       - name: Ricostruisci il keystore
@@ -117,6 +105,7 @@ jobs:
           CLEAN=$(printf '%s' "$KS_B64" | tr -d '[:space:]')
           printf '%s' "$CLEAN" | base64 -d > android.keystore
           chmod 600 android.keystore
+          echo "keystore: $(wc -c < android.keystore | tr -d ' ') byte"
           OPENED=""
           for T in PKCS12 JKS JCEKS; do
             if keytool -list -keystore android.keystore -storetype "$T" -storepass "$KS_PASS" >/dev/null 2>/tmp/kterr; then
@@ -125,6 +114,57 @@ jobs:
           done
           [ -n "$OPENED" ] || { echo "::error::keystore non apribile"; head -8 /tmp/kterr; exit 1; }
           echo "ANDROID_KEYSTORE_TYPE=$OPENED" >> "$GITHUB_ENV"
+
+      # apksigner ha detto: entry "android" does not contain a key.
+      # Il keystore si apre, ma l'alias nel twa-manifest non è quello reale:
+      # PWABuilder usa un alias proprio. keytool lo conosce, lo leggiamo e
+      # allineiamo il manifest PRIMA che bubblewrap generi il progetto.
+      - name: Rileva l'alias reale e allinea il manifest
+        env:
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -u
+          TYPE="${ANDROID_KEYSTORE_TYPE:-PKCS12}"
+          echo "── contenuto del keystore ──"
+          LIST=$(keytool -list -keystore android.keystore -storetype "$TYPE" -storepass "$KS_PASS" 2>/dev/null)
+          printf '%s\n' "$LIST"
+
+          ALIAS=$(printf '%s\n' "$LIST" | grep -i 'PrivateKeyEntry' | head -1 | awk -F',' '{print $1}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          if [ -z "$ALIAS" ]; then
+            ALIAS=$(printf '%s\n' "$LIST" | grep ',' | grep -vi 'keystore\|fingerprint\|provider' | head -1 | awk -F',' '{print $1}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          fi
+
+          if [ -z "$ALIAS" ]; then
+            echo "::error::Nessuna PrivateKeyEntry nel keystore."
+            echo "Un keystore con sole voci trustedCertEntry non può firmare un APK."
+            echo "Verifica di aver caricato il keystore generato da PWABuilder, non un certificato esportato."
+            exit 1
+          fi
+
+          echo "Alias reale rilevato: $ALIAS"
+          if ! keytool -list -keystore android.keystore -storetype "$TYPE" -storepass "$KS_PASS" -alias "$ALIAS" >/dev/null 2>/tmp/aerr; then
+            echo "::error::L'alias rilevato non è leggibile:"; head -6 /tmp/aerr; exit 1
+          fi
+
+          node -e "
+            const fs = require('fs');
+            const p = './twa-manifest.json';
+            const alias = process.argv[1];
+            const m = JSON.parse(fs.readFileSync(p, 'utf8'));
+            m.signingKey = m.signingKey || { path: './android.keystore' };
+            m.signingKey.path = './android.keystore';
+            const before = m.signingKey.alias;
+            m.signingKey.alias = alias;
+            fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
+            console.log('signingKey.alias: ' + before + ' -> ' + alias);
+            console.log('signingKey.path: ' + m.signingKey.path);
+          " "$ALIAS"
+
+          echo "KS_ALIAS=$ALIAS" >> "$GITHUB_ENV"
+          node -e "
+            const m = require('./twa-manifest.json');
+            console.log('manifest finale · alias: ' + m.signingKey.alias + ' · minSdk: ' + m.minSdkVersion + ' · versionCode: ' + m.appVersionCode);
+          "
 
       - name: Installa Bubblewrap
         run: npm install --no-audit --no-fund --ignore-scripts -g @bubblewrap/cli
@@ -168,10 +208,8 @@ jobs:
           printf 'y\ny\ny\n' | bubblewrap update || echo "::warning::update non-zero, verifico lo stato"
           ls -1
           test -f app/build.gradle && echo "progetto Android presente" || { echo "::error::app/build.gradle assente"; exit 1; }
-          echo "── minSdk nel progetto generato ──"
-          grep -n "minSdk" app/build.gradle || true
-          echo "── minSdk nel manifest sorgente ──"
-          grep -n "uses-sdk\|minSdkVersion" app/src/main/AndroidManifest.xml || true
+          echo "── minSdk nel progetto ──"; grep -n "minSdk" app/build.gradle || true
+          echo "── alias nel progetto ──"; grep -n "keyAlias" app/build.gradle || true
 
       - name: Allinea local.properties e verifica coerenza
         run: |
@@ -186,12 +224,14 @@ jobs:
             echo "::error::Percorsi SDK divergenti: Gradle rifiuterebbe la build."
             exit 1
           fi
-          MIN=$(node -e "console.log(require('./twa-manifest.json').minSdkVersion)")
-          if [ "$MIN" -lt "$ANDROID_MIN_SDK" ]; then
-            echo "::error::minSdk $MIN sotto il vincolo $ANDROID_MIN_SDK della libreria."
-            exit 1
-          fi
-          echo "Percorsi allineati e minSdk $MIN conforme."
+          node -e "
+            const m = require('./twa-manifest.json');
+            const MIN = parseInt(process.env.ANDROID_MIN_SDK, 10);
+            if (m.minSdkVersion < MIN) { console.error('::error::minSdk ' + m.minSdkVersion + ' sotto il vincolo'); process.exit(1); }
+            if (!m.signingKey || !m.signingKey.alias) { console.error('::error::signingKey.alias assente'); process.exit(1); }
+            if (m.signingKey.alias !== process.env.KS_ALIAS) { console.error('::error::alias disallineato dal keystore'); process.exit(1); }
+            console.log('minSdk ' + m.minSdkVersion + ' e alias ' + m.signingKey.alias + ' conformi.');
+          "
 
       - name: Build APK e AAB
         env:
@@ -206,13 +246,20 @@ jobs:
       - name: Gate · consegna condivisione
         run: node scripts/verify-apk.mjs app-release-signed.apk
 
+      - name: Verifica firma dell'APK
+        run: |
+          APKSIGNER="$BW_SDK/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
+          [ -x "$APKSIGNER" ] || APKSIGNER="$SDK_REAL/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
+          "$APKSIGNER" verify --print-certs app-release-signed.apk || true
+
       - name: Fingerprint della chiave
         env:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           echo "Fingerprint SHA-256 (deve coincidere con assetlinks.json):"
           keytool -list -v -keystore android.keystore \
-            -storetype "${ANDROID_KEYSTORE_TYPE:-PKCS12}" -storepass "$KS_PASS" \
+            -storetype "${ANDROID_KEYSTORE_TYPE:-PKCS12}" \
+            -alias "${KS_ALIAS}" -storepass "$KS_PASS" \
             | grep -A1 "SHA256:" || true
 
       - name: Rimuovi il keystore dal workspace
