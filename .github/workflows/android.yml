@@ -39,12 +39,7 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.1.0'
 
-      # SCOPERTA EMPIRICA: bubblewrap rifiuta la SDK root e accetta
-      # cmdline-tools/latest. Ma quel percorso non contiene licenses,
-      # platform-tools, platforms, build-tools: senza symlink, sdkmanager
-      # lanciato da bubblewrap non trova le licenze già accettate e salta
-      # i pacchetti ("Skipping following packages as the license is not accepted").
-      - name: Rendi cmdline-tools/latest una SDK root completa
+      - name: Prepara le due forme dell'SDK
         run: |
           set -e
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
@@ -57,42 +52,30 @@ jobs:
             ln -sfn "$SDK/cmdline-tools/$VER" "$SDK/cmdline-tools/latest"
           fi
           CT="$SDK/cmdline-tools/latest"
-          echo "SDK root reale: $SDK"
-          echo "Percorso per bubblewrap: $CT"
 
           yes 2>/dev/null | "$CT/bin/sdkmanager" --sdk_root="$SDK" --licenses >/dev/null 2>&1 || true
           "$CT/bin/sdkmanager" --sdk_root="$SDK" --install \
-            "platform-tools" \
-            "platforms;android-${ANDROID_API}" \
+            "platform-tools" "platforms;android-${ANDROID_API}" \
             "build-tools;${ANDROID_BUILD_TOOLS}" >/dev/null
 
-          # I symlink trasformano cmdline-tools/latest in una SDK root valida:
-          # bubblewrap trova bin/ e lib/ che pretende, più tutti i componenti.
+          # Forma A: cmdline-tools/latest diventa una SDK root completa.
+          # È il percorso che bubblewrap doctor ha già accettato.
           for d in licenses platform-tools platforms build-tools extras; do
             if [ -e "$SDK/$d" ]; then ln -sfn "$SDK/$d" "$CT/$d"; fi
           done
-
-          # Licenze ri-accettate ANCHE con sdk_root = il percorso di bubblewrap,
-          # così sdkmanager invoked by bubblewrap le vede.
           yes 2>/dev/null | "$CT/bin/sdkmanager" --sdk_root="$CT" --licenses >/dev/null 2>&1 || true
 
-          echo "── contenuto di $CT ──"
-          ls -la "$CT"
-          echo "── licenze visibili da bubblewrap ──"
-          ls -1 "$CT/licenses" || { echo "::error::cartella licenses assente"; exit 1; }
-          echo "── build-tools ──"
-          ls -1 "$CT/build-tools"
-          echo "── platforms ──"
-          ls -1 "$CT/platforms"
+          # Forma B: la root reale guadagna bin/ e lib/, così bubblewrap
+          # potrebbe accettare anche lei. Preferibile, perché è la root
+          # canonica che Gradle si aspetta.
+          for d in bin lib; do
+            if [ -e "$CT/$d" ]; then ln -sfn "$CT/$d" "$SDK/$d"; fi
+          done
 
-          test -d "$CT/build-tools/${ANDROID_BUILD_TOOLS}" || { echo "::error::build-tools ${ANDROID_BUILD_TOOLS} assente"; exit 1; }
-          test -d "$CT/platforms/android-${ANDROID_API}" || { echo "::error::platform android-${ANDROID_API} assente"; exit 1; }
-
-          echo "BW_SDK=$CT" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
-          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
-          echo "$CT/bin" >> "$GITHUB_PATH"
+          echo "── root reale ──"; ls -1 "$SDK"
+          echo "── cmdline-tools/latest ──"; ls -1 "$CT"
+          echo "SDK_REAL=$SDK" >> "$GITHUB_ENV"
+          echo "SDK_CT=$CT" >> "$GITHUB_ENV"
 
       - name: Verifica prerequisiti del repo
         run: |
@@ -101,7 +84,7 @@ jobs:
           test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" || { echo "::error::Secret ANDROID_KEYSTORE_BASE64 mancante"; exit 1; }
           test -n "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" || { echo "::error::Secret ANDROID_KEYSTORE_PASSWORD mancante"; exit 1; }
           test -n "${{ secrets.ANDROID_KEY_PASSWORD }}" || { echo "::error::Secret ANDROID_KEY_PASSWORD mancante"; exit 1; }
-          node -e "const m=require('./twa-manifest.json'); if(!m.shareTarget){console.error('::error::twa-manifest.json senza shareTarget');process.exit(1)} if(m.shareTarget.method!=='POST'){console.error('::error::shareTarget.method deve essere POST');process.exit(1)} console.log('shareTarget:', m.shareTarget.action, '· alias:', (m.signingKey&&m.signingKey.alias)||'(assente)', '· versionCode:', m.appVersionCode)"
+          node -e "const m=require('./twa-manifest.json'); if(!m.shareTarget){console.error('::error::twa-manifest.json senza shareTarget');process.exit(1)} if(m.shareTarget.method!=='POST'){console.error('::error::shareTarget.method deve essere POST');process.exit(1)} console.log('shareTarget:', m.shareTarget.action, '· versionCode:', m.appVersionCode)"
 
       - name: Ricostruisci il keystore
         env:
@@ -112,7 +95,6 @@ jobs:
           CLEAN=$(printf '%s' "$KS_B64" | tr -d '[:space:]')
           printf '%s' "$CLEAN" | base64 -d > android.keystore
           chmod 600 android.keystore
-          echo "keystore: $(wc -c < android.keystore | tr -d ' ') byte"
           OPENED=""
           for T in PKCS12 JKS JCEKS; do
             if keytool -list -keystore android.keystore -storetype "$T" -storepass "$KS_PASS" >/dev/null 2>/tmp/kterr; then
@@ -125,18 +107,47 @@ jobs:
       - name: Installa Bubblewrap
         run: npm install --no-audit --no-fund --ignore-scripts -g @bubblewrap/cli
 
-      - name: Configura Bubblewrap
+      # UN SOLO percorso per tutti. Gradle rifiuta ANDROID_HOME e
+      # ANDROID_SDK_ROOT divergenti: "Several environment variables ...
+      # contain different paths to the SDK". doctor sceglie quale forma
+      # bubblewrap accetta, e noi allineiamo env, config e local.properties.
+      - name: Scegli e allinea il percorso SDK
         run: |
+          set -u
           mkdir -p "$HOME/.bubblewrap"
-          printf '{\n  "jdkPath": "%s",\n  "androidSdkPath": "%s"\n}\n' \
-            "$JAVA_HOME" "$BW_SDK" > "$HOME/.bubblewrap/config.json"
-          cat "$HOME/.bubblewrap/config.json"
-          printf 'y\n' | bubblewrap doctor || { echo "::error::doctor rifiuta la configurazione"; exit 1; }
+          CHOSEN=""
+          for CAND in "$SDK_REAL" "$SDK_CT"; do
+            echo "=== candidato: $CAND ==="
+            printf '{\n  "jdkPath": "%s",\n  "androidSdkPath": "%s"\n}\n' \
+              "$JAVA_HOME" "$CAND" > "$HOME/.bubblewrap/config.json"
+            if printf 'y\n' | bubblewrap doctor >/tmp/doc 2>&1; then
+              echo ">>> doctor ACCETTA $CAND"
+              CHOSEN="$CAND"
+              break
+            else
+              echo "doctor rifiuta:"; tail -4 /tmp/doc
+            fi
+          done
 
-      # Il prompt "No checksum file was found ... would you like to regenerate"
-      # compare perché il progetto Android non è mai stato generato da init.
-      # update lo crea dal twa-manifest.json e scrive manifest-checksum.txt.
-      # stdin esplicito: senza, il prompt chiude il processo con exit 130.
+          if [ -z "$CHOSEN" ]; then
+            echo "::error::Nessun percorso accettato da doctor."
+            cat /tmp/doc || true
+            exit 1
+          fi
+
+          printf '{\n  "jdkPath": "%s",\n  "androidSdkPath": "%s"\n}\n' \
+            "$JAVA_HOME" "$CHOSEN" > "$HOME/.bubblewrap/config.json"
+
+          # I due env var DEVONO coincidere, altrimenti AGP si ferma.
+          echo "ANDROID_HOME=$CHOSEN" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$CHOSEN" >> "$GITHUB_ENV"
+          echo "BW_SDK=$CHOSEN" >> "$GITHUB_ENV"
+          echo "$CHOSEN/bin" >> "$GITHUB_PATH"
+          echo "$CHOSEN/platform-tools" >> "$GITHUB_PATH"
+
+          echo "config.json:"; cat "$HOME/.bubblewrap/config.json"
+          echo "Percorso allineato: $CHOSEN"
+
       - name: Genera il progetto Android
         env:
           BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -144,24 +155,34 @@ jobs:
         run: |
           set -u
           printf 'y\ny\ny\n' | bubblewrap update || echo "::warning::update non-zero, verifico lo stato"
-          echo "── file generati ──"
           ls -1
-          if [ -f manifest-checksum.txt ]; then
-            echo "manifest-checksum.txt presente"
-          else
-            echo "::warning::checksum assente: lo genererà il build"
+          test -f app/build.gradle && echo "progetto Android presente" || echo "::warning::app/build.gradle assente"
+
+      - name: Allinea local.properties e verifica coerenza
+        run: |
+          set -u
+          # bubblewrap scrive local.properties con il suo androidSdkPath:
+          # lo riallineiamo allo stesso valore degli env var.
+          printf 'sdk.dir=%s\n' "$BW_SDK" > local.properties
+          echo "local.properties:"; cat local.properties
+          CFG=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.HOME+'/.bubblewrap/config.json','utf8')).androidSdkPath)")
+          echo "ANDROID_HOME     = $ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT = $ANDROID_SDK_ROOT"
+          echo "config.json      = $CFG"
+          echo "local.properties = $(sed 's/^sdk.dir=//' local.properties)"
+          if [ "$ANDROID_HOME" != "$ANDROID_SDK_ROOT" ] || [ "$ANDROID_HOME" != "$CFG" ]; then
+            echo "::error::Percorsi SDK divergenti: Gradle rifiuterebbe la build."
+            exit 1
           fi
-          if [ -f app/build.gradle ]; then
-            echo "progetto Android presente"
-          else
-            echo "::warning::app/build.gradle assente: il build dovrà rigenerare"
-          fi
+          echo "Tutti i percorsi coincidono."
 
       - name: Build APK e AAB
         env:
           BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -u
+          printf 'sdk.dir=%s\n' "$BW_SDK" > local.properties
           printf 'y\ny\ny\n' | bubblewrap build --skipPwaValidation
           ls -1 *.apk *.aab 2>/dev/null || { echo "::error::nessun pacchetto prodotto"; exit 1; }
 
