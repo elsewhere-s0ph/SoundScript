@@ -36,8 +36,6 @@ jobs:
 
       # packages esplicito: il default dell'action è 'tools platform-tools' e
       # 'tools' è stato ritirato da Google nel 2021 → sdkmanager exit 1.
-      # Qui chiediamo solo ciò che serve, e l'action costruisce un SDK nella
-      # forma che bubblewrap si aspetta.
       - name: Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -104,6 +102,8 @@ jobs:
           test -n "${{ secrets.ANDROID_KEY_PASSWORD }}" || { echo "::error::Secret ANDROID_KEY_PASSWORD mancante"; exit 1; }
           node -e "const m=require('./twa-manifest.json'); if(!m.shareTarget){console.error('::error::twa-manifest.json senza shareTarget');process.exit(1)} if(m.shareTarget.method!=='POST'){console.error('::error::shareTarget.method deve essere POST');process.exit(1)} console.log('shareTarget:', m.shareTarget.action, '· alias:', (m.signingKey&&m.signingKey.alias)||'(assente)')"
 
+      # Il keystore viene solo decodificato dai Secrets. Non finisce negli
+      # artifact: su repo pubblico sarebbero leggibili da chiunque.
       - name: Ricostruisci il keystore
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -149,6 +149,8 @@ jobs:
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: bubblewrap build --skipPwaValidation
 
+      # GATE: senza ShareTargetActivity WhatsApp mostra l'app ma il file
+      # va perso. Questo controllo apre l'APK e verifica il componente.
       - name: Gate · consegna condivisione
         run: node scripts/verify-apk.mjs app-release-signed.apk
 
