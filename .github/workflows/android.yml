@@ -18,7 +18,7 @@ jobs:
   build:
     name: TWA · build, gate, artifact
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,17 +34,12 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # packages esplicito: il default dell'action è 'tools platform-tools' e
-      # 'tools' è stato ritirato da Google nel 2021 → sdkmanager exit 1.
       - name: Android SDK
         uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
-      # bubblewrap valida la FORMA dell'SDK: vuole cmdline-tools/latest.
-      # Le immagini del runner hanno cartelle versionate (es. 16.0) e il
-      # symlink latest può mancare: "The provided androidSdk isn't correct."
-      - name: SDK · forma, pacchetti, diagnosi
+      - name: SDK · struttura, versioni, candidati
         run: |
           set -e
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
@@ -57,36 +52,43 @@ jobs:
             if [ -n "$VER" ] && [ -d "$SDK/cmdline-tools/$VER" ]; then
               ln -sfn "$SDK/cmdline-tools/$VER" "$SDK/cmdline-tools/latest"
               echo "Symlink latest -> $VER creato."
-            else
-              echo "::error::Nessuna cartella cmdline-tools versionata da collegare a latest."
-              ls -la "$SDK/cmdline-tools" || true
-              exit 1
             fi
-          else
-            echo "cmdline-tools/latest già presente."
           fi
-
           SDKMAN="$SDK/cmdline-tools/latest/bin/sdkmanager"
-          [ -x "$SDKMAN" ] || { echo "::error::sdkmanager non eseguibile in $SDKMAN"; exit 1; }
+          [ -x "$SDKMAN" ] || { echo "::error::sdkmanager non eseguibile"; ls -la "$SDK/cmdline-tools" || true; exit 1; }
 
           yes 2>/dev/null | "$SDKMAN" --sdk_root="$SDK" --licenses >/dev/null 2>&1 || true
+
+          # bubblewrap può pretendere una versione precisa di build-tools e
+          # platform, diversa da quella che gli abbiamo indicato. Installiamo
+          # il set plausibile: costa poco e elimina la variabile versione.
           "$SDKMAN" --sdk_root="$SDK" --install \
             "platform-tools" \
-            "platforms;android-${ANDROID_API}" \
-            "build-tools;${ANDROID_BUILD_TOOLS}" >/dev/null
+            "platforms;android-33" "platforms;android-34" "platforms;android-${ANDROID_API}" \
+            "build-tools;33.0.2" "build-tools;34.0.0" "build-tools;${ANDROID_BUILD_TOOLS}" >/dev/null
 
-          for p in "platform-tools" "platforms/android-${ANDROID_API}" "build-tools/${ANDROID_BUILD_TOOLS}" "cmdline-tools/latest"; do
-            if [ -e "$SDK/$p" ]; then echo "OK   $p"; else echo "::error::manca $p"; exit 1; fi
-          done
-
-          echo "--- forma dell'SDK ---"
+          echo "── struttura della SDK root ──"
           ls -1 "$SDK"
-          echo "--- cmdline-tools ---"
-          ls -la "$SDK/cmdline-tools"
-          echo "--- build-tools ---"
+          echo "── build-tools installati ──"
           ls -1 "$SDK/build-tools"
-          echo "--- platforms ---"
+          echo "── platforms installati ──"
           ls -1 "$SDK/platforms"
+          echo "── cmdline-tools ──"
+          ls -la "$SDK/cmdline-tools"
+          echo "── cerco una cartella chiamata 'build' ──"
+          find "$SDK" -maxdepth 3 -type d -name build 2>/dev/null || echo "(nessuna)"
+          echo "── cerco 'build' anche nella home del runner ──"
+          find "$HOME" -maxdepth 4 -type d -name build 2>/dev/null || echo "(nessuna)"
+
+          # Struttura nella posizione che bubblewrap usa quando installa l'SDK
+          # da sé: i symlink riusano i componenti già scaricati, senza riscaricare.
+          BW="$HOME/.bubblewrap/android-sdk"
+          mkdir -p "$BW"
+          for d in cmdline-tools platform-tools platforms build-tools licenses; do
+            if [ -e "$SDK/$d" ]; then ln -sfn "$SDK/$d" "$BW/$d"; fi
+          done
+          echo "── struttura bubblewrap-native ──"
+          ls -la "$BW"
 
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
@@ -102,8 +104,6 @@ jobs:
           test -n "${{ secrets.ANDROID_KEY_PASSWORD }}" || { echo "::error::Secret ANDROID_KEY_PASSWORD mancante"; exit 1; }
           node -e "const m=require('./twa-manifest.json'); if(!m.shareTarget){console.error('::error::twa-manifest.json senza shareTarget');process.exit(1)} if(m.shareTarget.method!=='POST'){console.error('::error::shareTarget.method deve essere POST');process.exit(1)} console.log('shareTarget:', m.shareTarget.action, '· alias:', (m.signingKey&&m.signingKey.alias)||'(assente)')"
 
-      # Il keystore viene solo decodificato dai Secrets. Non finisce negli
-      # artifact: su repo pubblico sarebbero leggibili da chiunque.
       - name: Ricostruisci il keystore
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -113,8 +113,7 @@ jobs:
           CLEAN=$(printf '%s' "$KS_B64" | tr -d '[:space:]')
           printf '%s' "$CLEAN" | base64 -d > android.keystore
           chmod 600 android.keystore
-          SIZE=$(wc -c < android.keystore | tr -d ' ')
-          echo "keystore: $SIZE byte · magic $(od -An -tx1 -N4 android.keystore | tr -d ' \n')"
+          echo "keystore: $(wc -c < android.keystore | tr -d ' ') byte · magic $(od -An -tx1 -N4 android.keystore | tr -d ' \n')"
           OPENED=""
           for T in PKCS12 JKS JCEKS; do
             if keytool -list -keystore android.keystore -storetype "$T" -storepass "$KS_PASS" >/dev/null 2>/tmp/kterr; then
@@ -129,19 +128,59 @@ jobs:
       - name: Installa Bubblewrap
         run: npm install --no-audit --no-fund --ignore-scripts -g @bubblewrap/cli
 
-      - name: Configura Bubblewrap
+      - name: Config iniziale Bubblewrap
         run: |
           mkdir -p "$HOME/.bubblewrap"
           printf '{\n  "jdkPath": "%s",\n  "androidSdkPath": "%s"\n}\n' \
             "$JAVA_HOME" "$ANDROID_SDK_ROOT" > "$HOME/.bubblewrap/config.json"
           cat "$HOME/.bubblewrap/config.json"
-          node -e "JSON.parse(require('fs').readFileSync(process.env.HOME+'/.bubblewrap/config.json','utf8'));console.log('config.json valido')"
 
-      # Non bloccante: stampa cosa bubblewrap pensa dell'SDK, così se build
-      # fallisce abbiamo già la diagnosi invece di un messaggio generico.
-      - name: Bubblewrap doctor
-        continue-on-error: true
-        run: bubblewrap doctor
+      # doctor ha detto: il percorso deve contenere una cartella "build".
+      # Nessuna struttura standard la espone, quindi proviamo i candidati
+      # reali e lasciamo che sia doctor a dirci quale accetta.
+      - name: Risolvi androidSdkPath con doctor
+        run: |
+          set -u
+          SDK="$ANDROID_SDK_ROOT"
+          BW="$HOME/.bubblewrap/android-sdk"
+          FOUND=""
+          for CAND in "$BW" "$SDK" "$SDK/cmdline-tools/latest" "$SDK/cmdline-tools" "$SDK/build-tools/${ANDROID_BUILD_TOOLS}"; do
+            if [ ! -d "$CAND" ]; then
+              echo "--- $CAND : inesistente, salto"
+              continue
+            fi
+            echo "=== provo $CAND ==="
+            ls -1 "$CAND" | head -20
+            bubblewrap updateConfig --androidSdkPath "$CAND" >/tmp/upd 2>&1 || { echo "updateConfig:"; tail -3 /tmp/upd; }
+            if bubblewrap doctor >/tmp/doc 2>&1; then
+              echo ">>> doctor ACCETTA $CAND"
+              cat /tmp/doc
+              FOUND="$CAND"
+              break
+            else
+              echo "doctor rifiuta:"
+              tail -6 /tmp/doc
+            fi
+          done
+
+          if [ -z "$FOUND" ]; then
+            echo ""
+            echo "::error::Nessun percorso accettato da bubblewrap doctor."
+            echo "Output completo dell'ultimo doctor:"
+            cat /tmp/doc || true
+            echo ""
+            echo "config.json attuale:"
+            cat "$HOME/.bubblewrap/config.json" || true
+            echo ""
+            echo "Struttura completa della SDK per diagnosi:"
+            find "$SDK" -maxdepth 2 -type d 2>/dev/null | head -40
+            exit 1
+          fi
+
+          bubblewrap updateConfig --androidSdkPath "$FOUND"
+          echo "BW_ANDROID_SDK=$FOUND" >> "$GITHUB_ENV"
+          echo "config.json finale:"
+          cat "$HOME/.bubblewrap/config.json"
 
       - name: Build APK e AAB
         env:
@@ -149,8 +188,6 @@ jobs:
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: bubblewrap build --skipPwaValidation
 
-      # GATE: senza ShareTargetActivity WhatsApp mostra l'app ma il file
-      # va perso. Questo controllo apre l'APK e verifica il componente.
       - name: Gate · consegna condivisione
         run: node scripts/verify-apk.mjs app-release-signed.apk
 
