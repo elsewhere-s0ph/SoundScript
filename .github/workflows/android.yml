@@ -13,6 +13,7 @@ concurrency:
 env:
   ANDROID_API: "36"
   ANDROID_BUILD_TOOLS: "36.1.0"
+  ANDROID_MIN_SDK: "24"
 
 jobs:
   build:
@@ -44,7 +45,6 @@ jobs:
           set -e
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
           [ -d "$SDK" ] || { echo "::error::SDK non trovata in $SDK"; exit 1; }
-
           mkdir -p "$SDK/cmdline-tools"
           if [ ! -e "$SDK/cmdline-tools/latest" ]; then
             VER=$(ls -1 "$SDK/cmdline-tools" 2>/dev/null | grep -v '^latest$' | sort -V | tail -1 || true)
@@ -52,26 +52,17 @@ jobs:
             ln -sfn "$SDK/cmdline-tools/$VER" "$SDK/cmdline-tools/latest"
           fi
           CT="$SDK/cmdline-tools/latest"
-
           yes 2>/dev/null | "$CT/bin/sdkmanager" --sdk_root="$SDK" --licenses >/dev/null 2>&1 || true
           "$CT/bin/sdkmanager" --sdk_root="$SDK" --install \
             "platform-tools" "platforms;android-${ANDROID_API}" \
             "build-tools;${ANDROID_BUILD_TOOLS}" >/dev/null
-
-          # Forma A: cmdline-tools/latest diventa una SDK root completa.
-          # È il percorso che bubblewrap doctor ha già accettato.
           for d in licenses platform-tools platforms build-tools extras; do
             if [ -e "$SDK/$d" ]; then ln -sfn "$SDK/$d" "$CT/$d"; fi
           done
           yes 2>/dev/null | "$CT/bin/sdkmanager" --sdk_root="$CT" --licenses >/dev/null 2>&1 || true
-
-          # Forma B: la root reale guadagna bin/ e lib/, così bubblewrap
-          # potrebbe accettare anche lei. Preferibile, perché è la root
-          # canonica che Gradle si aspetta.
           for d in bin lib; do
             if [ -e "$CT/$d" ]; then ln -sfn "$CT/$d" "$SDK/$d"; fi
           done
-
           echo "── root reale ──"; ls -1 "$SDK"
           echo "── cmdline-tools/latest ──"; ls -1 "$CT"
           echo "SDK_REAL=$SDK" >> "$GITHUB_ENV"
@@ -84,7 +75,38 @@ jobs:
           test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" || { echo "::error::Secret ANDROID_KEYSTORE_BASE64 mancante"; exit 1; }
           test -n "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" || { echo "::error::Secret ANDROID_KEYSTORE_PASSWORD mancante"; exit 1; }
           test -n "${{ secrets.ANDROID_KEY_PASSWORD }}" || { echo "::error::Secret ANDROID_KEY_PASSWORD mancante"; exit 1; }
-          node -e "const m=require('./twa-manifest.json'); if(!m.shareTarget){console.error('::error::twa-manifest.json senza shareTarget');process.exit(1)} if(m.shareTarget.method!=='POST'){console.error('::error::shareTarget.method deve essere POST');process.exit(1)} console.log('shareTarget:', m.shareTarget.action, '· versionCode:', m.appVersionCode)"
+
+      # androidbrowserhelper 2.7.4 dichiara minSdk 24. Con 21 il manifest
+      # merger si ferma: "uses-sdk:minSdkVersion 21 cannot be smaller than
+      # version 24 declared in library". Allineiamo il manifest prima che
+      # bubblewrap generi il progetto, così il valore è giusto alla nascita.
+      # tools:overrideLibrary non è un'alternativa: forzerebbe l'uso di API
+      # non presenti su Android 5/6, con crash a runtime.
+      - name: Allinea minSdkVersion al vincolo della libreria
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = './twa-manifest.json';
+            const MIN = parseInt(process.env.ANDROID_MIN_SDK, 10);
+            const m = JSON.parse(fs.readFileSync(p, 'utf8'));
+            const before = m.minSdkVersion;
+            if (!Number.isFinite(before) || before < MIN) {
+              m.minSdkVersion = MIN;
+              fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
+              console.log('minSdkVersion: ' + before + ' -> ' + MIN);
+            } else {
+              console.log('minSdkVersion già conforme: ' + before);
+            }
+            if (!m.shareTarget) { console.error('::error::twa-manifest.json senza shareTarget'); process.exit(1); }
+            if (m.shareTarget.method !== 'POST') { console.error('::error::shareTarget.method deve essere POST'); process.exit(1); }
+            console.log('shareTarget: ' + m.shareTarget.action + ' · versionCode: ' + m.appVersionCode);
+          "
+          node -e "
+            const m = require('./twa-manifest.json');
+            const MIN = parseInt(process.env.ANDROID_MIN_SDK, 10);
+            if (m.minSdkVersion < MIN) { console.error('::error::minSdkVersion ancora ' + m.minSdkVersion); process.exit(1); }
+            console.log('Vincolo soddisfatto: minSdk ' + m.minSdkVersion + ' (Android ' + (m.minSdkVersion === 24 ? '7.0' : m.minSdkVersion) + '+)');
+          "
 
       - name: Ricostruisci il keystore
         env:
@@ -107,10 +129,6 @@ jobs:
       - name: Installa Bubblewrap
         run: npm install --no-audit --no-fund --ignore-scripts -g @bubblewrap/cli
 
-      # UN SOLO percorso per tutti. Gradle rifiuta ANDROID_HOME e
-      # ANDROID_SDK_ROOT divergenti: "Several environment variables ...
-      # contain different paths to the SDK". doctor sceglie quale forma
-      # bubblewrap accetta, e noi allineiamo env, config e local.properties.
       - name: Scegli e allinea il percorso SDK
         run: |
           set -u
@@ -122,31 +140,24 @@ jobs:
               "$JAVA_HOME" "$CAND" > "$HOME/.bubblewrap/config.json"
             if printf 'y\n' | bubblewrap doctor >/tmp/doc 2>&1; then
               echo ">>> doctor ACCETTA $CAND"
-              CHOSEN="$CAND"
-              break
+              CHOSEN="$CAND"; break
             else
               echo "doctor rifiuta:"; tail -4 /tmp/doc
             fi
           done
-
           if [ -z "$CHOSEN" ]; then
             echo "::error::Nessun percorso accettato da doctor."
             cat /tmp/doc || true
             exit 1
           fi
-
           printf '{\n  "jdkPath": "%s",\n  "androidSdkPath": "%s"\n}\n' \
             "$JAVA_HOME" "$CHOSEN" > "$HOME/.bubblewrap/config.json"
-
-          # I due env var DEVONO coincidere, altrimenti AGP si ferma.
           echo "ANDROID_HOME=$CHOSEN" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$CHOSEN" >> "$GITHUB_ENV"
           echo "BW_SDK=$CHOSEN" >> "$GITHUB_ENV"
           echo "$CHOSEN/bin" >> "$GITHUB_PATH"
           echo "$CHOSEN/platform-tools" >> "$GITHUB_PATH"
-
-          echo "config.json:"; cat "$HOME/.bubblewrap/config.json"
-          echo "Percorso allineato: $CHOSEN"
+          cat "$HOME/.bubblewrap/config.json"
 
       - name: Genera il progetto Android
         env:
@@ -156,15 +167,16 @@ jobs:
           set -u
           printf 'y\ny\ny\n' | bubblewrap update || echo "::warning::update non-zero, verifico lo stato"
           ls -1
-          test -f app/build.gradle && echo "progetto Android presente" || echo "::warning::app/build.gradle assente"
+          test -f app/build.gradle && echo "progetto Android presente" || { echo "::error::app/build.gradle assente"; exit 1; }
+          echo "── minSdk nel progetto generato ──"
+          grep -n "minSdk" app/build.gradle || true
+          echo "── minSdk nel manifest sorgente ──"
+          grep -n "uses-sdk\|minSdkVersion" app/src/main/AndroidManifest.xml || true
 
       - name: Allinea local.properties e verifica coerenza
         run: |
           set -u
-          # bubblewrap scrive local.properties con il suo androidSdkPath:
-          # lo riallineiamo allo stesso valore degli env var.
           printf 'sdk.dir=%s\n' "$BW_SDK" > local.properties
-          echo "local.properties:"; cat local.properties
           CFG=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.HOME+'/.bubblewrap/config.json','utf8')).androidSdkPath)")
           echo "ANDROID_HOME     = $ANDROID_HOME"
           echo "ANDROID_SDK_ROOT = $ANDROID_SDK_ROOT"
@@ -174,7 +186,12 @@ jobs:
             echo "::error::Percorsi SDK divergenti: Gradle rifiuterebbe la build."
             exit 1
           fi
-          echo "Tutti i percorsi coincidono."
+          MIN=$(node -e "console.log(require('./twa-manifest.json').minSdkVersion)")
+          if [ "$MIN" -lt "$ANDROID_MIN_SDK" ]; then
+            echo "::error::minSdk $MIN sotto il vincolo $ANDROID_MIN_SDK della libreria."
+            exit 1
+          fi
+          echo "Percorsi allineati e minSdk $MIN conforme."
 
       - name: Build APK e AAB
         env:
