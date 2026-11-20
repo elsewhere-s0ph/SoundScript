@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-/* Gate post-build: apre l'APK appena prodotto e verifica che il manifest
-   Android contenga il consegnatario della condivisione.
-   Il pacchetto precedente aveva ACTION_SEND e audio/*, ma non
-   ShareTargetActivity: WhatsApp mostrava l'app e il file andava perso.
-   Questo controllo impedisce di ripubblicare la stessa condizione. */
+/* Gate post-build: verifica che l'APK dichiari la consegna della condivisione.
+   android-browser-helper non usa una ShareTargetActivity: espone un
+   <meta-data android:name="android.support.customtabs.trusted.METADATA_SHARE_TARGET">
+   che punta a una risorsa XML. La configurazione (action, method, enctype,
+   params) vive quindi in res/xml/, non nella string pool del manifest.
+   Cercare "ShareTargetActivity" nel manifest produce un falso negativo. */
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { inflateRawSync } from "node:zlib";
@@ -26,7 +27,7 @@ if (!existsSync(join(process.cwd(), APK))) {
 const buf = readFileSync(join(process.cwd(), APK));
 ok(APK + " letto · " + (buf.length / 1048576).toFixed(2) + " MB");
 
-/* ---------- ZIP: central directory ---------- */
+/* ---------- ZIP ---------- */
 function zipEntries(b) {
   const out = [];
   if (b.length < 22) return out;
@@ -43,20 +44,17 @@ function zipEntries(b) {
     if (b.readUInt32LE(off) !== 0x02014b50) break;
     const method = b.readUInt16LE(off + 10);
     const csize = b.readUInt32LE(off + 20);
-    const usize = b.readUInt32LE(off + 24);
     const nl = b.readUInt16LE(off + 28);
     const el = b.readUInt16LE(off + 30);
     const cl = b.readUInt16LE(off + 32);
     const lho = b.readUInt32LE(off + 42);
     const ns = off + 46;
     if (ns + nl > b.length) break;
-    const name = b.toString("utf8", ns, ns + nl);
-    out.push({ name, method, csize, usize, lho });
+    out.push({ name: b.toString("utf8", ns, ns + nl), method, csize, lho });
     off = ns + nl + el + cl;
   }
   return out;
 }
-
 function entryBuffer(b, e) {
   if (e.lho + 30 > b.length) throw new Error("local header fuori limite");
   if (b.readUInt32LE(e.lho) !== 0x04034b50) throw new Error("local header non valido");
@@ -81,25 +79,20 @@ if (lower.some((n) => /\.(keystore|jks|p12|pem|key)$/.test(n))) {
   bad("l'APK contiene una chiave privata: non pubblicarlo");
 }
 if (names.indexOf("BundleConfig.pb") >= 0 || lower.some((n) => n.startsWith("base/manifest/"))) {
-  bad("questo è un AAB, non un APK: il gate richiede il pacchetto installabile");
+  bad("questo è un AAB, non un APK");
   finish();
+}
+if (!lower.some((n) => /^meta-inf\/.*\.(rsa|dsa|ec)$/.test(n))) {
+  warn("nessuna firma v1 in META-INF: possibile firma solo v2/v3");
+} else {
+  ok("firma presente in META-INF");
 }
 if (names.indexOf("AndroidManifest.xml") < 0) { bad("AndroidManifest.xml assente"); finish(); }
 
-const manEntry = entries.find((e) => e.name === "AndroidManifest.xml");
-let man;
-try {
-  man = entryBuffer(buf, manEntry);
-  ok("AndroidManifest.xml estratto · " + man.length + " byte · " + (manEntry.method === 8 ? "deflate" : "stored"));
-} catch (e) {
-  bad("estrazione fallita: " + e.message);
-  finish();
-}
-
-/* ---------- AXML: string pool ---------- */
+/* ---------- AXML string pool ---------- */
 function stringPool(b) {
-  if (b.length < 16) throw new Error("manifest troppo corto");
-  if (b.readUInt16LE(0) !== 0x0003) throw new Error("non è AXML Android");
+  if (b.length < 16) throw new Error("buffer troppo corto");
+  if (b.readUInt16LE(0) !== 0x0003) throw new Error("non è AXML");
   const cs = 8;
   if (b.readUInt16LE(cs) !== 0x0001) throw new Error("string pool non in testa");
   const count = b.readUInt32LE(cs + 8);
@@ -141,13 +134,16 @@ function stringPool(b) {
       }
     } catch (e) { out.push(""); }
   }
-  return { strings: out.filter(Boolean), utf8 };
+  return out.filter(Boolean);
 }
 
-function rawScan(b) {
+/* estrae stringhe leggibili da un buffer arbitrario (risorse, arsc) */
+function rawStrings(b) {
   const out = [];
   const seen = new Set();
-  const push = (s) => { if (s.length >= 4 && /^[\x20-\x7E]+$/.test(s) && !seen.has(s)) { seen.add(s); out.push(s); } };
+  const push = (s) => {
+    if (s.length >= 3 && /^[\x20-\x7E]+$/.test(s) && !seen.has(s)) { seen.add(s); out.push(s); }
+  };
   let cur = "";
   for (let i = 0; i < b.length; i++) {
     const c = b[i];
@@ -163,49 +159,113 @@ function rawScan(b) {
   push(cur);
   return out;
 }
-
-let pool = [];
-try {
-  const p = stringPool(man);
-  pool = p.strings;
-  ok("string pool: " + pool.length + " voci · " + (p.utf8 ? "UTF-8" : "UTF-16"));
-} catch (e) {
-  warn("parsing AXML fallito (" + e.message + "), uso la scansione grezza");
-  pool = rawScan(man);
-  ok("scansione grezza: " + pool.length + " stringhe");
+function stringsOf(b) {
+  try {
+    const p = stringPool(b);
+    if (p.length > 2) return p;
+  } catch (e) { /* non è AXML: fallback */ }
+  return rawStrings(b);
 }
 
-const has = (re) => pool.some((s) => re.test(s));
-const find = (re) => pool.filter((s) => re.test(s));
+const manEntry = entries.find((e) => e.name === "AndroidManifest.xml");
+let manStrings = [];
+try {
+  const mb = entryBuffer(buf, manEntry);
+  manStrings = stringsOf(mb);
+  ok("AndroidManifest.xml estratto · " + mb.length + " byte · " + manStrings.length + " stringhe");
+} catch (e) {
+  bad("estrazione manifest fallita: " + e.message);
+  finish();
+}
 
-/* ---------- i controlli che contano ---------- */
+const has = (re) => manStrings.some((s) => re.test(s));
+const find = (re) => manStrings.filter((s) => re.test(s));
+
+/* ---------- 1 · registrazione nel menu Condividi ---------- */
 const send = has(/android\.intent\.action\.SEND$/i);
-const shareActivity = find(/ShareTargetActivity/i);
-const shareString = find(/share-?target/i);
+const sendMulti = has(/android\.intent\.action\.SEND_MULTIPLE$/i);
 const audioMime = find(/^audio\//i);
 const anyMime = find(/^[a-z][a-z0-9!#$&^_.+-]*\/[a-z0-9!#$&^_.+*-]+$/i).filter((m) => !/^android\./i.test(m));
-const multipart = has(/multipart/i);
-const helper = find(/androidbrowserhelper/i);
 
 send ? ok("ACTION_SEND presente") : bad("ACTION_SEND assente: l'app non compare nel menu Condividi");
+sendMulti ? ok("SEND_MULTIPLE presente") : warn("SEND_MULTIPLE assente: sufficiente SEND per un vocale");
 audioMime.length
   ? ok("mime audio: " + audioMime.join(", "))
-  : bad("nessun mime audio nel filtro (trovati: " + (anyMime.join(", ") || "nessuno") + ")");
+  : bad("nessun mime audio (trovati: " + (anyMime.join(", ") || "nessuno") + ")");
 
-if (shareActivity.length) ok("ShareTargetActivity presente: " + shareActivity.join(", "));
-else bad("ShareTargetActivity ASSENTE: il pacchetto riceve l'intent ma non ha chi lo converte nella POST. È esattamente il difetto del pacchetto precedente.");
+/* ---------- 2 · il meccanismo di consegna ---------- */
+/* android-browser-helper: meta-data METADATA_SHARE_TARGET sul LauncherActivity,
+   che punta a una risorsa XML. Non esiste una ShareTargetActivity. */
+const metaShare = find(/METADATA_SHARE_TARGET/i);
+const delegation = find(/DelegationService/i);
+const shareStringInManifest = find(/share-?target/i);
 
-if (shareString.length) ok("destinazione share-target: " + shareString.join(", "));
-else bad("nessuna stringa share-target: l'URL di consegna non è nel manifest Android");
+if (metaShare.length) {
+  ok("meta-data di consegna: " + metaShare.join(", "));
+} else if (shareStringInManifest.length) {
+  ok("destinazione dichiarata nel manifest: " + shareStringInManifest.join(", "));
+} else {
+  bad("nessun meta-data METADATA_SHARE_TARGET né stringa share-target: il pacchetto non dichiara la consegna");
+}
+delegation.length
+  ? ok("DelegationService presente: " + delegation.join(", "))
+  : warn("DelegationService non rilevato nel pool");
 
-multipart ? ok("traccia multipart presente") : warn("nessuna stringa multipart: può essere normale, il valore vive nelle risorse");
-helper.length ? ok(helper.length + " componenti android-browser-helper") : warn("nessun componente android-browser-helper rilevato");
+/* ---------- 3 · la configurazione nelle risorse ---------- */
+/* action URL, method, enctype e params vivono in res/xml/, non nel manifest.
+   Le cerchiamo lì. Se non le troviamo, è un avviso: il formato delle risorse
+   può variare con resource shrinking, e non è motivo per bloccare. */
+const resEntries = entries.filter((e) =>
+  /^res\/.*\.xml$/i.test(e.name) || /^resources\.arsc$/i.test(e.name)
+);
+console.log("\n── risorse esaminate: " + resEntries.length + " ──");
+const cfgHits = { action: [], method: [], enctype: [], field: [] };
+let resScanned = 0;
+for (const e of resEntries) {
+  let strs = [];
+  try {
+    const rb = entryBuffer(buf, e);
+    strs = stringsOf(rb);
+    resScanned++;
+  } catch (err) { continue; }
+  strs.forEach((s) => {
+    if (/share-?target/i.test(s)) cfgHits.action.push(e.name + " → " + s);
+    if (/^POST$/i.test(s)) cfgHits.method.push(e.name + " → " + s);
+    if (/multipart\/form-data/i.test(s)) cfgHits.enctype.push(e.name + " → " + s);
+    if (/^audio$/i.test(s)) cfgHits.field.push(e.name + " → " + s);
+  });
+}
+console.log("  risorse decodificate: " + resScanned + "/" + resEntries.length);
 
-if (!send || !audioMime.length || !shareActivity.length || !shareString.length) {
-  console.log("\nComponenti trovati nel pool:");
-  helper.forEach((h) => console.log("  · " + h));
-  console.log("\nStringhe rilevanti:");
-  pool.filter((s) => /intent|audio|share|browserhelper|Delegation|Launcher/i.test(s))
+const cfgFound = [];
+if (cfgHits.action.length) { ok("action di consegna: " + cfgHits.action[0]); cfgFound.push("action"); }
+if (cfgHits.method.length) { ok("method POST: " + cfgHits.method[0]); cfgFound.push("method"); }
+if (cfgHits.enctype.length) { ok("enctype multipart: " + cfgHits.enctype[0]); cfgFound.push("enctype"); }
+if (cfgHits.field.length) { ok("campo file 'audio': " + cfgHits.field[0]); cfgFound.push("field"); }
+
+if (!cfgFound.length) {
+  warn("configurazione dello share target non leggibile nelle risorse: possibile offuscamento dei nomi");
+  console.log("  Le prime risorse XML nell'APK:");
+  resEntries.slice(0, 12).forEach((e) => console.log("    · " + e.name));
+} else if (cfgFound.length < 4) {
+  warn("configurazione parziale (" + cfgFound.join(", ") + "): le altre voci possono essere in risorse non decodificabili");
+}
+
+/* ---------- 4 · verdetto ---------- */
+const declared = send && audioMime.length > 0 && (metaShare.length > 0 || shareStringInManifest.length > 0);
+console.log("");
+if (declared) {
+  ok("VERDETTO: il pacchetto dichiara la consegna della condivisione audio");
+  if (cfgFound.length >= 2) {
+    ok("configurazione confermata nelle risorse: " + cfgFound.join(", "));
+  } else {
+    console.log("  La prova finale è sul dispositivo: installa l'APK, condividi un vocale");
+    console.log("  da WhatsApp e verifica che la trascrizione parta.");
+  }
+} else {
+  bad("VERDETTO: il pacchetto non dichiara la consegna. Controlla shareTarget in twa-manifest.json.");
+  console.log("\nStringhe rilevanti nel manifest:");
+  manStrings.filter((s) => /intent|audio|share|browserhelper|Delegation|Launcher/i.test(s))
     .forEach((s) => console.log("  · " + s));
 }
 
@@ -217,10 +277,6 @@ function finish() {
   if (errors.length) {
     console.log("\nPROBLEMI BLOCCANTI:");
     errors.forEach((e, i) => console.log(" " + (i + 1) + ") " + e));
-    console.log("\nL'APK non viene pubblicato. Se manca ShareTargetActivity,");
-    console.log("la versione di Bubblewrap non ha generato il consegnatario:");
-    console.log("verifica che twa-manifest.json contenga shareTarget con");
-    console.log("method POST, enctype multipart/form-data e params.files.");
     process.exit(1);
   }
   console.log("APK idoneo alla pubblicazione.");
