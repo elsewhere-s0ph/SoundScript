@@ -10,6 +10,10 @@ concurrency:
   group: android-build
   cancel-in-progress: false
 
+env:
+  ANDROID_API: "35"
+  ANDROID_BUILD_TOOLS: "35.0.0"
+
 jobs:
   build:
     name: TWA · build, gate, artifact
@@ -30,10 +34,46 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
+      # Nessuna action di terze parti per l'SDK: ubuntu-latest lo include già.
+      # android-actions/setup-android@v3 tenta di installare il pacchetto legacy
+      # "tools", rimosso da Google nel 2021, e sdkmanager esce con codice 1.
+      - name: Android SDK · verifica e componenti
+        run: |
+          set -e
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK" ]; then
+            echo "::error::Android SDK non trovato in $SDK"
+            exit 1
+          fi
+          echo "SDK root: $SDK"
 
-      - name: Verifica prerequisiti
+          SDKMAN=""
+          for c in "$SDK/cmdline-tools/latest/bin/sdkmanager" "$SDK"/cmdline-tools/*/bin/sdkmanager; do
+            if [ -x "$c" ]; then SDKMAN="$c"; break; fi
+          done
+          if [ -z "$SDKMAN" ]; then
+            echo "::error::sdkmanager non trovato sotto $SDK/cmdline-tools"
+            ls -la "$SDK" || true
+            exit 1
+          fi
+          echo "sdkmanager: $SDKMAN"
+
+          yes 2>/dev/null | "$SDKMAN" --sdk_root="$SDK" --licenses >/dev/null 2>&1 || true
+          "$SDKMAN" --sdk_root="$SDK" --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_API}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}"
+
+          test -d "$SDK/platforms/android-${ANDROID_API}" || { echo "::error::platform android-${ANDROID_API} assente"; exit 1; }
+          test -d "$SDK/build-tools/${ANDROID_BUILD_TOOLS}" || { echo "::error::build-tools ${ANDROID_BUILD_TOOLS} assente"; exit 1; }
+
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "Componenti SDK pronti."
+
+      - name: Verifica prerequisiti del repo
         run: |
           test -f twa-manifest.json || { echo "::error::twa-manifest.json assente alla root"; exit 1; }
           test -f scripts/verify-apk.mjs || { echo "::error::scripts/verify-apk.mjs assente"; exit 1; }
