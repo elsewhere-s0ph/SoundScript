@@ -191,30 +191,91 @@ jobs:
       # pubblicata su Maven Central. È l'unica leva che può modificare il
       # ponte intent → Chrome dentro l'APK. Se il gate o la build peggiorano,
       # rilancia il workflow con "helper-bump = false" dall'UI di Actions.
-      - name: Bump android-browser-helper (sperimentale)
+            - name: Bump android-browser-helper (sperimentale)
         if: inputs.helper-bump == true
         run: |
-          set -u
-          LATEST=$(curl -fsS "https://search.maven.org/solrsearch/select?q=g:com.google.androidbrowserhelper+AND+a:androidbrowserhelper&rows=1&wt=json" \
-            | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const r=JSON.parse(d);if(!r.response||!r.response.docs||!r.response.docs[0]){process.exit(1);}console.log(r.response.docs[0].latestVersion);})")
+          set -euo pipefail
+          
+          echo "=== Ricerca ultima versione su Maven Central ==="
+          
+          # Fetch con timeout e gestione errori esplicita
+          MAVEN_RESPONSE=$(curl -fsS --max-time 10 \
+            "https://search.maven.org/solrsearch/select?q=g:com.google.androidbrowserhelper+AND+a:androidbrowserhelper&rows=1&wt=json" \
+            2>/dev/null) || {
+            echo "::warning::Impossibile raggiungere Maven Central (timeout o errore di rete)"
+            echo "Mantengo la versione corrente di Bubblewrap"
+            exit 0
+          }
+          
+          # Parse JSON con gestione errori
+          LATEST=$(echo "$MAVEN_RESPONSE" | node -e "
+            let d='';
+            process.stdin.on('data',c=>d+=c);
+            process.stdin.on('end',()=>{
+              try {
+                const r=JSON.parse(d);
+                if(!r.response?.docs?.[0]?.latestVersion){
+                  console.error('Risposta Maven non valida');
+                  process.exit(1);
+                }
+                console.log(r.response.docs[0].latestVersion);
+              } catch(e) {
+                console.error('Errore parsing JSON:', e.message);
+                process.exit(1);
+              }
+            });
+            process.stdin.on('error',e=>{
+              console.error('Errore stdin:', e.message);
+              process.exit(1);
+            });
+          " 2>&1) || {
+            echo "::warning::Errore nel parsing della risposta Maven"
+            echo "Risposta ricevuta: $MAVEN_RESPONSE"
+            exit 0
+          }
+          
           if [ -z "$LATEST" ]; then
-            echo "::warning::Maven Central non raggiungibile, mantengo la versione di Bubblewrap"
+            echo "::warning::Nessuna versione trovata su Maven Central"
             exit 0
           fi
-          echo "Ultima versione su Maven Central: $LATEST"
-
-          BEFORE=$(grep -oE "com\.google\.androidbrowserhelper:androidbrowserhelper:[0-9.]+" app/build.gradle | head -1 || true)
+          
+          echo "✓ Ultima versione su Maven Central: $LATEST"
+          
+          # Verifica che app/build.gradle esista
+          if [ ! -f "app/build.gradle" ]; then
+            echo "::error::app/build.gradle non trovato"
+            exit 1
+          fi
+          
+          # Trova la versione corrente
+          BEFORE=$(grep -oE "com\.google\.androidbrowserhelper:androidbrowserhelper:[0-9.]+" app/build.gradle | head -1 || echo "")
+          
           if [ -z "$BEFORE" ]; then
-            echo "::warning::dipendenza androidbrowserhelper non trovata in app/build.gradle"
+            echo "::warning::Dipendenza androidbrowserhelper non trovata in app/build.gradle"
+            echo "Contenuto rilevante di app/build.gradle:"
+            grep -n "androidbrowserhelper\|implementation.*browser" app/build.gradle || echo "(nessuna corrispondenza trovata)"
             exit 0
           fi
-          echo "Versione attuale (da Bubblewrap): $BEFORE"
-
-          if ! grep -qE "androidbrowserhelper:$LATEST" app/build.gradle; then
-            sed -i -E "s|com\.google\.androidbrowserhelper:androidbrowserhelper:[0-9.]+|com.google.androidbrowserhelper:androidbrowserhelper:$LATEST|g" app/build.gradle
-            echo "Patched."
+          
+          echo "✓ Versione attuale (da Bubblewrap): $BEFORE"
+          
+          # Verifica se è già l'ultima versione
+          if echo "$BEFORE" | grep -qE ":$LATEST$"; then
+            echo "✓ Già all'ultima versione, nessuna modifica necessaria"
+            exit 0
+          fi
+          
+          # Applica il patch
+          echo "=== Applicazione patch ==="
+          if sed -i -E "s|com\.google\.androidbrowserhelper:androidbrowserhelper:[0-9.]+|com.google.androidbrowserhelper:androidbrowserhelper:$LATEST|g" app/build.gradle; then
+            echo "✓ Patch applicato con successo"
+            echo ""
+            echo "=== Configurazione dopo il bump ==="
+            grep -n "androidbrowserhelper" app/build.gradle
+            echo "HELPER_BUMPED=$LATEST" >> "$GITHUB_ENV"
           else
-            echo "Già all'ultima versione."
+            echo "::error::Fallimento nell'applicazione del patch con sed"
+            exit 1
           fi
 
           echo "── helper dopo il bump ──"
