@@ -2,6 +2,11 @@ name: android
 
 on:
   workflow_dispatch:
+    inputs:
+      helper-bump:
+        description: "Bump android-browser-helper all'ultima versione su Maven Central (esperimento)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -14,13 +19,13 @@ env:
   ANDROID_API: "36"
   ANDROID_BUILD_TOOLS: "36.1.0"
   ANDROID_MIN_SDK: "24"
-  APP_VERSION_NAME: "1.4.0"
+  APP_VERSION_NAME: "1.5.0"
 
 jobs:
   build:
     name: TWA · build, gate, artifact
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,13 +72,7 @@ jobs:
           echo "SDK_REAL=$SDK" >> "$GITHUB_ENV"
           echo "SDK_CT=$CT" >> "$GITHUB_ENV"
 
-      # CAUSA DELL'ERRORE DI INSTALLAZIONE: Bubblewrap converte ogni voce di
-      # shareTarget.params.files[].accept in un <data android:mimeType>.
-      # Le estensioni (.ogg, .mp3…) NON sono MIME type: Android fallisce con
-      # INSTALL_PARSE_FAILED_MANIFEST_MALFORMED / MalformedMimeTypeException.
-      # Qui normalizziamo a soli MIME type, prima che il progetto esista.
-      # versionCode = numero di run: sempre crescente, mai un downgrade.
-      - name: Normalizza shareTarget e versione
+      - name: Normalizza shareTarget, accept MIME e versione
         run: |
           node -e "
             const fs = require('fs');
@@ -94,7 +93,7 @@ jobs:
             m.appVersionName = process.env.APP_VERSION_NAME;
             m.appVersionCode = parseInt(process.env.GITHUB_RUN_NUMBER, 10);
             fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
-            console.log('accept normalizzato a ' + MIME.length + ' MIME type, zero estensioni');
+            console.log('accept: ' + MIME.length + ' MIME type, zero estensioni');
             console.log('versionName ' + m.appVersionName + ' · versionCode ' + m.appVersionCode);
           "
 
@@ -109,9 +108,8 @@ jobs:
             const m = require('./twa-manifest.json');
             const acc = (m.shareTarget && m.shareTarget.params && m.shareTarget.params.files || []).flatMap(f => f.accept || []);
             const bad = acc.filter(a => /^\./.test(a));
-            if (bad.length) { console.error('::error::accept contiene estensioni, Android rifiuterebbe il manifest: ' + bad.join(', ')); process.exit(1); }
+            if (bad.length) { console.error('::error::accept contiene estensioni: ' + bad.join(', ')); process.exit(1); }
             if (!m.shareTarget || m.shareTarget.method !== 'POST') { console.error('::error::shareTarget.method deve essere POST'); process.exit(1); }
-            console.log('accept pulito: ' + acc.join(', '));
           "
 
       - name: Ricostruisci il keystore
@@ -149,7 +147,6 @@ jobs:
             m.signingKey.path = './android.keystore';
             m.signingKey.alias = process.argv[1];
             fs.writeFileSync('./twa-manifest.json', JSON.stringify(m, null, 2) + '\n');
-            console.log('signingKey.alias -> ' + m.signingKey.alias);
           " "$ALIAS"
           echo "KS_ALIAS=$ALIAS" >> "$GITHUB_ENV"
 
@@ -170,7 +167,7 @@ jobs:
               tail -4 /tmp/doc
             fi
           done
-          [ -n "$CHOSEN" ] || { echo "::error::nessun percorso accettato da doctor"; cat /tmp/doc || true; exit 1; }
+          [ -n "$CHOSEN" ] || { echo "::error::nessun percorso accettato"; cat /tmp/doc || true; exit 1; }
           printf '{\n  "jdkPath": "%s",\n  "androidSdkPath": "%s"\n}\n' \
             "$JAVA_HOME" "$CHOSEN" > "$HOME/.bubblewrap/config.json"
           echo "ANDROID_HOME=$CHOSEN" >> "$GITHUB_ENV"
@@ -187,8 +184,42 @@ jobs:
           set -u
           printf 'y\ny\ny\n' | bubblewrap update || echo "::warning::update non-zero"
           test -f app/build.gradle || { echo "::error::progetto Android non generato"; exit 1; }
-          echo "── mime type nel manifest generato ──"
-          grep -o 'android:mimeType="[^"]*"' app/src/main/AndroidManifest.xml | sort -u || true
+          echo "── helper prima del bump ──"
+          grep -n "androidbrowserhelper" app/build.gradle || true
+
+      # ESPERIMENTO: bump di android-browser-helper all'ultima versione
+      # pubblicata su Maven Central. È l'unica leva che può modificare il
+      # ponte intent → Chrome dentro l'APK. Se il gate o la build peggiorano,
+      # rilancia il workflow con "helper-bump = false" dall'UI di Actions.
+      - name: Bump android-browser-helper (sperimentale)
+        if: inputs.helper-bump == true
+        run: |
+          set -u
+          LATEST=$(curl -fsS "https://search.maven.org/solrsearch/select?q=g:com.google.androidbrowserhelper+AND+a:androidbrowserhelper&rows=1&wt=json" \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const r=JSON.parse(d);if(!r.response||!r.response.docs||!r.response.docs[0]){process.exit(1);}console.log(r.response.docs[0].latestVersion);})")
+          if [ -z "$LATEST" ]; then
+            echo "::warning::Maven Central non raggiungibile, mantengo la versione di Bubblewrap"
+            exit 0
+          fi
+          echo "Ultima versione su Maven Central: $LATEST"
+
+          BEFORE=$(grep -oE "com\.google\.androidbrowserhelper:androidbrowserhelper:[0-9.]+" app/build.gradle | head -1 || true)
+          if [ -z "$BEFORE" ]; then
+            echo "::warning::dipendenza androidbrowserhelper non trovata in app/build.gradle"
+            exit 0
+          fi
+          echo "Versione attuale (da Bubblewrap): $BEFORE"
+
+          if ! grep -qE "androidbrowserhelper:$LATEST" app/build.gradle; then
+            sed -i -E "s|com\.google\.androidbrowserhelper:androidbrowserhelper:[0-9.]+|com.google.androidbrowserhelper:androidbrowserhelper:$LATEST|g" app/build.gradle
+            echo "Patched."
+          else
+            echo "Già all'ultima versione."
+          fi
+
+          echo "── helper dopo il bump ──"
+          grep -n "androidbrowserhelper" app/build.gradle
+          echo "HELPER_BUMPED=$LATEST" >> "$GITHUB_ENV"
 
       - name: Allinea local.properties e verifica coerenza
         run: |
