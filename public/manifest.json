@@ -43,7 +43,22 @@
       "files": [
         {
           "name": "audio",
-          "accept": ["audio/*", ".ogg", ".opus", ".m4a", ".mp3", ".wav", ".aac"]
+          "accept": [
+            "audio/*",
+            "audio/ogg",
+            "audio/mpeg",
+            "audio/mp4",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/aac",
+            "audio/flac",
+            "audio/webm",
+            "audio/amr",
+            "audio/3gpp",
+            "audio/3gpp2",
+            "audio/x-m4a",
+            "audio/opus"
+          ]
         }
       ]
     }
