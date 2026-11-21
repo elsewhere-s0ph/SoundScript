@@ -14,6 +14,7 @@ env:
   ANDROID_API: "36"
   ANDROID_BUILD_TOOLS: "36.1.0"
   ANDROID_MIN_SDK: "24"
+  APP_VERSION_NAME: "1.4.0"
 
 jobs:
   build:
@@ -63,10 +64,39 @@ jobs:
           for d in bin lib; do
             if [ -e "$CT/$d" ]; then ln -sfn "$CT/$d" "$SDK/$d"; fi
           done
-          echo "── root reale ──"; ls -1 "$SDK"
-          echo "── cmdline-tools/latest ──"; ls -1 "$CT"
           echo "SDK_REAL=$SDK" >> "$GITHUB_ENV"
           echo "SDK_CT=$CT" >> "$GITHUB_ENV"
+
+      # CAUSA DELL'ERRORE DI INSTALLAZIONE: Bubblewrap converte ogni voce di
+      # shareTarget.params.files[].accept in un <data android:mimeType>.
+      # Le estensioni (.ogg, .mp3…) NON sono MIME type: Android fallisce con
+      # INSTALL_PARSE_FAILED_MANIFEST_MALFORMED / MalformedMimeTypeException.
+      # Qui normalizziamo a soli MIME type, prima che il progetto esista.
+      # versionCode = numero di run: sempre crescente, mai un downgrade.
+      - name: Normalizza shareTarget e versione
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = './twa-manifest.json';
+            const m = JSON.parse(fs.readFileSync(p, 'utf8'));
+            const MIME = [
+              'audio/*','audio/ogg','audio/mpeg','audio/mp4','audio/wav',
+              'audio/x-wav','audio/aac','audio/flac','audio/webm',
+              'audio/amr','audio/3gpp','audio/3gpp2','audio/x-m4a','audio/opus'
+            ];
+            const st = m.shareTarget || (m.shareTarget = {});
+            st.action = st.action || '/share-target.html';
+            st.method = 'POST';
+            st.enctype = 'multipart/form-data';
+            st.params = st.params || {};
+            st.params.files = [{ name: 'audio', accept: MIME }];
+            m.minSdkVersion = Math.max(m.minSdkVersion || 0, parseInt(process.env.ANDROID_MIN_SDK, 10));
+            m.appVersionName = process.env.APP_VERSION_NAME;
+            m.appVersionCode = parseInt(process.env.GITHUB_RUN_NUMBER, 10);
+            fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
+            console.log('accept normalizzato a ' + MIME.length + ' MIME type, zero estensioni');
+            console.log('versionName ' + m.appVersionName + ' · versionCode ' + m.appVersionCode);
+          "
 
       - name: Verifica prerequisiti del repo
         run: |
@@ -75,25 +105,13 @@ jobs:
           test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" || { echo "::error::Secret ANDROID_KEYSTORE_BASE64 mancante"; exit 1; }
           test -n "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" || { echo "::error::Secret ANDROID_KEYSTORE_PASSWORD mancante"; exit 1; }
           test -n "${{ secrets.ANDROID_KEY_PASSWORD }}" || { echo "::error::Secret ANDROID_KEY_PASSWORD mancante"; exit 1; }
-
-      - name: Allinea minSdkVersion al vincolo della libreria
-        run: |
           node -e "
-            const fs = require('fs');
-            const p = './twa-manifest.json';
-            const MIN = parseInt(process.env.ANDROID_MIN_SDK, 10);
-            const m = JSON.parse(fs.readFileSync(p, 'utf8'));
-            const before = m.minSdkVersion;
-            if (!Number.isFinite(before) || before < MIN) {
-              m.minSdkVersion = MIN;
-              fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
-              console.log('minSdkVersion: ' + before + ' -> ' + MIN);
-            } else {
-              console.log('minSdkVersion già conforme: ' + before);
-            }
-            if (!m.shareTarget) { console.error('::error::twa-manifest.json senza shareTarget'); process.exit(1); }
-            if (m.shareTarget.method !== 'POST') { console.error('::error::shareTarget.method deve essere POST'); process.exit(1); }
-            console.log('shareTarget: ' + m.shareTarget.action);
+            const m = require('./twa-manifest.json');
+            const acc = (m.shareTarget && m.shareTarget.params && m.shareTarget.params.files || []).flatMap(f => f.accept || []);
+            const bad = acc.filter(a => /^\./.test(a));
+            if (bad.length) { console.error('::error::accept contiene estensioni, Android rifiuterebbe il manifest: ' + bad.join(', ')); process.exit(1); }
+            if (!m.shareTarget || m.shareTarget.method !== 'POST') { console.error('::error::shareTarget.method deve essere POST'); process.exit(1); }
+            console.log('accept pulito: ' + acc.join(', '));
           "
 
       - name: Ricostruisci il keystore
@@ -105,7 +123,6 @@ jobs:
           CLEAN=$(printf '%s' "$KS_B64" | tr -d '[:space:]')
           printf '%s' "$CLEAN" | base64 -d > android.keystore
           chmod 600 android.keystore
-          echo "keystore: $(wc -c < android.keystore | tr -d ' ') byte"
           OPENED=""
           for T in PKCS12 JKS JCEKS; do
             if keytool -list -keystore android.keystore -storetype "$T" -storepass "$KS_PASS" >/dev/null 2>/tmp/kterr; then
@@ -115,56 +132,26 @@ jobs:
           [ -n "$OPENED" ] || { echo "::error::keystore non apribile"; head -8 /tmp/kterr; exit 1; }
           echo "ANDROID_KEYSTORE_TYPE=$OPENED" >> "$GITHUB_ENV"
 
-      # apksigner ha detto: entry "android" does not contain a key.
-      # Il keystore si apre, ma l'alias nel twa-manifest non è quello reale:
-      # PWABuilder usa un alias proprio. keytool lo conosce, lo leggiamo e
-      # allineiamo il manifest PRIMA che bubblewrap generi il progetto.
       - name: Rileva l'alias reale e allinea il manifest
         env:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           set -u
           TYPE="${ANDROID_KEYSTORE_TYPE:-PKCS12}"
-          echo "── contenuto del keystore ──"
           LIST=$(keytool -list -keystore android.keystore -storetype "$TYPE" -storepass "$KS_PASS" 2>/dev/null)
-          printf '%s\n' "$LIST"
-
           ALIAS=$(printf '%s\n' "$LIST" | grep -i 'PrivateKeyEntry' | head -1 | awk -F',' '{print $1}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          if [ -z "$ALIAS" ]; then
-            ALIAS=$(printf '%s\n' "$LIST" | grep ',' | grep -vi 'keystore\|fingerprint\|provider' | head -1 | awk -F',' '{print $1}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          fi
-
-          if [ -z "$ALIAS" ]; then
-            echo "::error::Nessuna PrivateKeyEntry nel keystore."
-            echo "Un keystore con sole voci trustedCertEntry non può firmare un APK."
-            echo "Verifica di aver caricato il keystore generato da PWABuilder, non un certificato esportato."
-            exit 1
-          fi
-
-          echo "Alias reale rilevato: $ALIAS"
-          if ! keytool -list -keystore android.keystore -storetype "$TYPE" -storepass "$KS_PASS" -alias "$ALIAS" >/dev/null 2>/tmp/aerr; then
-            echo "::error::L'alias rilevato non è leggibile:"; head -6 /tmp/aerr; exit 1
-          fi
-
+          [ -n "$ALIAS" ] || { echo "::error::nessuna PrivateKeyEntry nel keystore"; exit 1; }
+          echo "Alias reale: $ALIAS"
           node -e "
             const fs = require('fs');
-            const p = './twa-manifest.json';
-            const alias = process.argv[1];
-            const m = JSON.parse(fs.readFileSync(p, 'utf8'));
+            const m = JSON.parse(fs.readFileSync('./twa-manifest.json','utf8'));
             m.signingKey = m.signingKey || { path: './android.keystore' };
             m.signingKey.path = './android.keystore';
-            const before = m.signingKey.alias;
-            m.signingKey.alias = alias;
-            fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
-            console.log('signingKey.alias: ' + before + ' -> ' + alias);
-            console.log('signingKey.path: ' + m.signingKey.path);
+            m.signingKey.alias = process.argv[1];
+            fs.writeFileSync('./twa-manifest.json', JSON.stringify(m, null, 2) + '\n');
+            console.log('signingKey.alias -> ' + m.signingKey.alias);
           " "$ALIAS"
-
           echo "KS_ALIAS=$ALIAS" >> "$GITHUB_ENV"
-          node -e "
-            const m = require('./twa-manifest.json');
-            console.log('manifest finale · alias: ' + m.signingKey.alias + ' · minSdk: ' + m.minSdkVersion + ' · versionCode: ' + m.appVersionCode);
-          "
 
       - name: Installa Bubblewrap
         run: npm install --no-audit --no-fund --ignore-scripts -g @bubblewrap/cli
@@ -175,21 +162,15 @@ jobs:
           mkdir -p "$HOME/.bubblewrap"
           CHOSEN=""
           for CAND in "$SDK_REAL" "$SDK_CT"; do
-            echo "=== candidato: $CAND ==="
             printf '{\n  "jdkPath": "%s",\n  "androidSdkPath": "%s"\n}\n' \
               "$JAVA_HOME" "$CAND" > "$HOME/.bubblewrap/config.json"
             if printf 'y\n' | bubblewrap doctor >/tmp/doc 2>&1; then
-              echo ">>> doctor ACCETTA $CAND"
-              CHOSEN="$CAND"; break
+              echo ">>> doctor ACCETTA $CAND"; CHOSEN="$CAND"; break
             else
-              echo "doctor rifiuta:"; tail -4 /tmp/doc
+              tail -4 /tmp/doc
             fi
           done
-          if [ -z "$CHOSEN" ]; then
-            echo "::error::Nessun percorso accettato da doctor."
-            cat /tmp/doc || true
-            exit 1
-          fi
+          [ -n "$CHOSEN" ] || { echo "::error::nessun percorso accettato da doctor"; cat /tmp/doc || true; exit 1; }
           printf '{\n  "jdkPath": "%s",\n  "androidSdkPath": "%s"\n}\n' \
             "$JAVA_HOME" "$CHOSEN" > "$HOME/.bubblewrap/config.json"
           echo "ANDROID_HOME=$CHOSEN" >> "$GITHUB_ENV"
@@ -197,7 +178,6 @@ jobs:
           echo "BW_SDK=$CHOSEN" >> "$GITHUB_ENV"
           echo "$CHOSEN/bin" >> "$GITHUB_PATH"
           echo "$CHOSEN/platform-tools" >> "$GITHUB_PATH"
-          cat "$HOME/.bubblewrap/config.json"
 
       - name: Genera il progetto Android
         env:
@@ -205,33 +185,18 @@ jobs:
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -u
-          printf 'y\ny\ny\n' | bubblewrap update || echo "::warning::update non-zero, verifico lo stato"
-          ls -1
-          test -f app/build.gradle && echo "progetto Android presente" || { echo "::error::app/build.gradle assente"; exit 1; }
-          echo "── minSdk nel progetto ──"; grep -n "minSdk" app/build.gradle || true
-          echo "── alias nel progetto ──"; grep -n "keyAlias" app/build.gradle || true
+          printf 'y\ny\ny\n' | bubblewrap update || echo "::warning::update non-zero"
+          test -f app/build.gradle || { echo "::error::progetto Android non generato"; exit 1; }
+          echo "── mime type nel manifest generato ──"
+          grep -o 'android:mimeType="[^"]*"' app/src/main/AndroidManifest.xml | sort -u || true
 
       - name: Allinea local.properties e verifica coerenza
         run: |
           set -u
           printf 'sdk.dir=%s\n' "$BW_SDK" > local.properties
           CFG=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.HOME+'/.bubblewrap/config.json','utf8')).androidSdkPath)")
-          echo "ANDROID_HOME     = $ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT = $ANDROID_SDK_ROOT"
-          echo "config.json      = $CFG"
-          echo "local.properties = $(sed 's/^sdk.dir=//' local.properties)"
-          if [ "$ANDROID_HOME" != "$ANDROID_SDK_ROOT" ] || [ "$ANDROID_HOME" != "$CFG" ]; then
-            echo "::error::Percorsi SDK divergenti: Gradle rifiuterebbe la build."
-            exit 1
-          fi
-          node -e "
-            const m = require('./twa-manifest.json');
-            const MIN = parseInt(process.env.ANDROID_MIN_SDK, 10);
-            if (m.minSdkVersion < MIN) { console.error('::error::minSdk ' + m.minSdkVersion + ' sotto il vincolo'); process.exit(1); }
-            if (!m.signingKey || !m.signingKey.alias) { console.error('::error::signingKey.alias assente'); process.exit(1); }
-            if (m.signingKey.alias !== process.env.KS_ALIAS) { console.error('::error::alias disallineato dal keystore'); process.exit(1); }
-            console.log('minSdk ' + m.minSdkVersion + ' e alias ' + m.signingKey.alias + ' conformi.');
-          "
+          [ "$ANDROID_HOME" = "$ANDROID_SDK_ROOT" ] && [ "$ANDROID_HOME" = "$CFG" ] || { echo "::error::percorsi SDK divergenti"; exit 1; }
+          echo "Percorsi allineati: $CFG"
 
       - name: Build APK e AAB
         env:
@@ -246,17 +211,10 @@ jobs:
       - name: Gate · consegna condivisione
         run: node scripts/verify-apk.mjs app-release-signed.apk
 
-      - name: Verifica firma dell'APK
-        run: |
-          APKSIGNER="$BW_SDK/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
-          [ -x "$APKSIGNER" ] || APKSIGNER="$SDK_REAL/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
-          "$APKSIGNER" verify --print-certs app-release-signed.apk || true
-
       - name: Fingerprint della chiave
         env:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          echo "Fingerprint SHA-256 (deve coincidere con assetlinks.json):"
           keytool -list -v -keystore android.keystore \
             -storetype "${ANDROID_KEYSTORE_TYPE:-PKCS12}" \
             -alias "${KS_ALIAS}" -storepass "$KS_PASS" \
