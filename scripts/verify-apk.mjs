@@ -193,6 +193,18 @@ audioMime.length
   ? ok("mime audio: " + audioMime.join(", "))
   : bad("nessun mime audio (trovati: " + (anyMime.join(", ") || "nessuno") + ")");
 
+/* ---------- 1bis · nessun MIME type malformed ---------- */
+/* Bubblewrap copia ogni voce di accept in android:mimeType. Un'estensione
+   (.ogg, .mp3…) non è un MIME type e Android rifiuta l'installazione con
+   INSTALL_PARSE_FAILED_MANIFEST_MALFORMED prima ancora di aprire l'app. */
+const malformedMime = manStrings.filter((s) => /^\.[A-Za-z0-9]{1,8}$/.test(s));
+if (malformedMime.length) {
+  bad("MIME type malformati nel manifest Android: " + malformedMime.join(", ") +
+      " · sono estensioni finite in accept: usa solo audio/* e audio/<sottotipo>");
+} else {
+  ok("nessuna estensione usata come MIME type");
+}
+
 /* ---------- 2 · il meccanismo di consegna ---------- */
 /* android-browser-helper: meta-data METADATA_SHARE_TARGET sul LauncherActivity,
    che punta a una risorsa XML. Non esiste una ShareTargetActivity. */
