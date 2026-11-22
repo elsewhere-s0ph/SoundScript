@@ -1,0 +1,141 @@
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag della release a cui allegare l'APK (es. v1.7.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  attach:
+    name: Build APK e allega alla Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Verifica tag
+        run: |
+          test -n "$TAG" || { echo "::error::tag mancante"; exit 1; }
+          echo "Release di riferimento: $TAG"
+
+      - name: Checkout del tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Deriva versione dal tag
+        run: |
+          echo "APP_VERSION_NAME=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Verifica progetto Android
+        run: |
+          test -d android || { echo "::error::android/ assente: lancia android-init"; exit 1; }
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+
+      - name: Accetta le licenze SDK
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          CT="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$CT" ] || CT=$(ls -1 "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+          yes 2>/dev/null | "$CT" --sdk_root="$SDK" --licenses >/dev/null 2>&1 || true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/build.gradle', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Installa dipendenze web
+        run: npm install --no-audit --no-fund --ignore-scripts
+
+      - name: Build web
+        run: npm run build
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Genera icone Android
+        run: node scripts/gen-android-icons.mjs
+
+      - name: Ricostruisci il keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -u
+          CLEAN=$(printf '%s' "$KS_B64" | tr -d '[:space:]')
+          printf '%s' "$CLEAN" | base64 -d > android/release.keystore
+          chmod 600 android/release.keystore
+          OPENED=""
+          for T in PKCS12 JKS JCEKS; do
+            if keytool -list -keystore android/release.keystore -storetype "$T" -storepass "$KS_PASS" >/dev/null 2>/tmp/kterr; then OPENED="$T"; break; fi
+          done
+          [ -n "$OPENED" ] || { echo "::error::keystore non apribile"; head -8 /tmp/kterr; exit 1; }
+          ALIAS=$(keytool -list -keystore android/release.keystore -storetype "$OPENED" -storepass "$KS_PASS" 2>/dev/null \
+            | grep -i 'PrivateKeyEntry' | head -1 | awk -F',' '{print $1}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          [ -n "$ALIAS" ] || { echo "::error::nessuna PrivateKeyEntry"; exit 1; }
+          echo "KS_PATH=$GITHUB_WORKSPACE/android/release.keystore" >> "$GITHUB_ENV"
+          echo "KS_STORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+          echo "KS_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "KS_KEY_ALIAS=$ALIAS" >> "$GITHUB_ENV"
+
+      - name: Build APK (release)
+        env:
+          APP_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Prepara APK e checksum
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk out/SoundScript.apk
+          (cd out && sha256sum SoundScript.apk > SHA256SUMS.txt)
+          cat out/SHA256SUMS.txt
+
+      - name: Gate · intento di condivisione
+        run: node scripts/verify-apk.mjs out/SoundScript.apk
+
+      - name: Allega alla Release (senza toccare titolo/changelog)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: |
+            out/SoundScript.apk
+            out/SHA256SUMS.txt
+
+      - name: Rimuovi il keystore
+        if: always()
+        run: shred -u android/release.keystore 2>/dev/null || rm -f android/release.keystore
