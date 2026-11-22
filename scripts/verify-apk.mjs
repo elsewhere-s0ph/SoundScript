@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /* Gate post-build: verifica che l'APK dichiari la consegna della condivisione.
    Accetta due architetture:
-   - TWA: meta-data METADATA_SHARE_TARGET di android-browser-helper
-   - Capacitor: intent-filter SEND audio/* sulla MainActivity con BridgeActivity
+   - Capacitor: WebView nativa. Marcatori = assets/native-bridge.js + bundle
+     in assets/public + MainActivity nel manifest. (BridgeActivity NON appare
+     nel manifest: è la superclasse Java, non una voce dichiarata.)
+   - TWA: meta-data METADATA_SHARE_TARGET di android-browser-helper.
    Blocca sempre: chiave privata dentro l'APK, AAB spacciato per APK,
    estensioni usate come MIME type (INSTALL_PARSE_FAILED_MANIFEST_MALFORMED). */
 import { readFileSync, existsSync } from "node:fs";
@@ -191,14 +193,21 @@ if (malformed.length) {
   ok("nessuna estensione usata come MIME type");
 }
 
-/* 2 · meccanismo di consegna: TWA oppure Capacitor */
+/* 2 · meccanismo di consegna: Capacitor oppure TWA.
+   Capacitor si riconosce dai FILE dentro l'APK, non dalle stringhe del
+   manifest: native-bridge.js è il ponte JS↔nativo, assets/public è il bundle. */
+const nativeBridge = names.some((n) => /(^|\/)native-bridge\.js$/i.test(n));
+const hasBundle = names.some((n) => n.startsWith("assets/public/"));
+const mainActivity = manStrings.some((s) => /MainActivity$/.test(s));
 const metaShare = find(/METADATA_SHARE_TARGET/i);
 const shareString = find(/share-?target/i);
-const capacitor = find(/BridgeActivity|com\.getcapacitor/i);
 const delegation = find(/DelegationService/i);
+const isCapacitor = nativeBridge || (hasBundle && mainActivity);
 
-if (capacitor.length) {
-  ok("pacchetto Capacitor: WebView nativa, intent letto in-process");
+if (nativeBridge) ok("ponte Capacitor: assets/native-bridge.js presente");
+if (isCapacitor) {
+  ok("pacchetto Capacitor: WebView nativa, intent letto in-process" +
+     (nativeBridge ? "" : " (riconosciuto da bundle + MainActivity)"));
 } else if (metaShare.length || shareString.length) {
   ok("pacchetto TWA: meta-data di consegna presente");
 } else {
@@ -207,20 +216,23 @@ if (capacitor.length) {
 if (delegation.length) ok("DelegationService presente (TWA)");
 
 /* 3 · bundle web dentro l'APK (modalità bundled) */
-const hasBundle = names.some((n) => n.startsWith("assets/public/"));
 hasBundle ? ok("bundle web impacchettato in assets/public")
   : warn("nessun assets/public: verifica webDir in capacitor.config.json");
 
 /* 4 · verdetto */
-const declared = send && audioMime.length > 0 && (capacitor.length > 0 || metaShare.length > 0 || shareString.length > 0);
+const declared = send && audioMime.length > 0 && (isCapacitor || metaShare.length > 0 || shareString.length > 0);
 console.log("");
 if (declared) {
   ok("VERDETTO: il pacchetto dichiara la consegna della condivisione audio");
 } else {
   bad("VERDETTO: dichiarazione di consegna incompleta");
-  console.log("Stringhe rilevanti:");
+  console.log("Stringhe rilevanti nel manifest:");
   manStrings.filter((s) => /intent|audio|share|capacitor|Bridge|Main/i.test(s))
     .forEach((s) => console.log("  · " + s));
+  console.log("Marcatori Capacitor cercati:");
+  console.log("  native-bridge.js: " + (nativeBridge ? "sì" : "no"));
+  console.log("  assets/public:    " + (hasBundle ? "sì" : "no"));
+  console.log("  MainActivity:     " + (mainActivity ? "sì" : "no"));
 }
 
 finish();
