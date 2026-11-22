@@ -1,0 +1,75 @@
+name: bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "Tipo di incremento"
+        type: choice
+        default: patch
+        options:
+          - patch   # 1.7.3 -> 1.7.4  (fix, piccole modifiche)
+          - minor   # 1.7.3 -> 1.8.0  (nuove funzionalità)
+          - major   # 1.7.3 -> 2.0.0  (cambiamenti rompenti)
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bumpa versione e crea il tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Bumpa package.json
+        id: ver
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = './package.json';
+            const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+            const [M, m, pa] = pkg.version.split('.').map(Number);
+            const kind = process.env.KIND;
+            let next;
+            if (kind === 'major') next = [M + 1, 0, 0];
+            else if (kind === 'minor') next = [M, m + 1, 0];
+            else next = [M, m, pa + 1];
+            pkg.version = next.join('.');
+            fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+            console.log('NEW=' + pkg.version);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'new=' + pkg.version + '\n');
+          "
+        env:
+          KIND: ${{ inputs.kind }}
+
+      - name: Commit e tag
+        run: |
+          NEW="${{ steps.ver.outputs.new }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore: release ${NEW}"
+          git push origin HEAD:main
+          git tag "v${NEW}"
+          git push origin "v${NEW}"
+          echo "Creato tag v${NEW}"
+
+      - name: Riepilogo
+        run: |
+          echo "Nuova versione: ${{ steps.ver.outputs.new }}"
+          echo "Tag pushato: v${{ steps.ver.outputs.new }}"
+          echo "Ora crea la Release da questo tag e incolla il changelog."
