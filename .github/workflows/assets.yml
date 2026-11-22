@@ -1,0 +1,48 @@
+name: assets
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "public/og-banner.svg"
+      - "scripts/gen-og-image.mjs"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: assets
+  cancel-in-progress: true
+
+jobs:
+  regen:
+    name: Rigenera anteprima social
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Installa dipendenze
+        run: npm install --no-audit --no-fund --ignore-scripts
+
+      - name: Rigenera og-1200.png
+        run: node scripts/gen-og-image.mjs
+
+      - name: Commit del PNG
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/icons/og-1200.png
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica al PNG."
+          else
+            git commit -m "chore(assets): rigenera og-1200.png dal banner pulito"
+            git push origin HEAD:main
+          fi
