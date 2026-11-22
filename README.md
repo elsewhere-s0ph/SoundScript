@@ -361,6 +361,6 @@ Progetto personale — tutti i diritti riservati, salvo diverso file LICENSE.
 
 <div align="center">
 
-**[⬆ back to top / torna su](#-soundscript)**
+**[⬆ back to top / torna su](#soundscript)**
 
 </div>
