@@ -209,17 +209,20 @@ jobs:
           cat > android/app/build.gradle <<'GRADLE_EOF'
           apply plugin: 'com.android.application'
 
+          def vc = Integer.parseInt(System.getenv("APP_VERSION_CODE") ?: "1")
+          def vn = System.getenv("APP_VERSION_NAME") ?: "1.6.0"
+
           android {
-              namespace "studio.littleelsewhere.soundscript"
-              compileSdk 34
+              namespace = "studio.littleelsewhere.soundscript"
+              compileSdk = 34
 
               defaultConfig {
-                  applicationId "studio.littleelsewhere.soundscript"
-                  minSdk 22
-                  targetSdk 34
-                  versionCode (System.getenv("APP_VERSION_CODE") ?: "1") as int
-                  versionName System.getenv("APP_VERSION_NAME") ?: "1.6.0"
-                  testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+                  applicationId = "studio.littleelsewhere.soundscript"
+                  minSdk = 22
+                  targetSdk = 34
+                  versionCode = vc
+                  versionName = vn
+                  testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                   aaptOptions {
                       ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
                   }
@@ -228,20 +231,20 @@ jobs:
               signingConfigs {
                   release {
                       if (System.getenv("KS_PATH")) {
-                          storeFile file(System.getenv("KS_PATH"))
-                          storePassword System.getenv("KS_STORE_PASSWORD")
-                          keyAlias System.getenv("KS_KEY_ALIAS")
-                          keyPassword System.getenv("KS_KEY_PASSWORD")
+                          storeFile = file(System.getenv("KS_PATH"))
+                          storePassword = System.getenv("KS_STORE_PASSWORD")
+                          keyAlias = System.getenv("KS_KEY_ALIAS")
+                          keyPassword = System.getenv("KS_KEY_PASSWORD")
                       }
                   }
               }
 
               buildTypes {
                   release {
-                      minifyEnabled false
+                      minifyEnabled = false
                       proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
                       if (System.getenv("KS_PATH")) {
-                          signingConfig signingConfigs.release
+                          signingConfig = signingConfigs.release
                       }
                   }
               }
