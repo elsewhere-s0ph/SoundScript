@@ -1,5 +1,4 @@
 <a id="top"></a>
-
 [![checks](https://github.com/elsewhere-s0ph/SoundScript/actions/workflows/checks.yml/badge.svg)](https://github.com/elsewhere-s0ph/SoundScript/actions/workflows/checks.yml)
 
 <div align="center">
