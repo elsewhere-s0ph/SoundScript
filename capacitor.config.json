@@ -1,0 +1,14 @@
+{
+  "appId": "studio.littleelsewhere.soundscript",
+  "appName": "SoundScript",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "backgroundColor": "#0f172a"
+}
