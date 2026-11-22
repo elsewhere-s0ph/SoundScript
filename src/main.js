@@ -309,6 +309,23 @@ function showInfoToast(title, desc) {
 async function checkForUpdates() {
   const btn = $("#checkUpdateBtn");
   const label = $("#checkUpdateLabel");
+
+  // In nativo (APK Capacitor bundled) non esiste un service worker da
+  // aggiornare: il codice web è dentro l'APK. Gli aggiornamenti arrivano
+  // installando una nuova APK, non via SW. Dirlo, invece di dare errore rete.
+  let native = false;
+  try { native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); } catch (e) {}
+  if (native || window.__SS_NATIVE__) {
+    const msg = (typeof LANG !== "undefined" && LANG === "en")
+      ? "You're on the native app: updates arrive by installing a newer APK, not from the web."
+      : "Sei sull'app nativa: gli aggiornamenti arrivano installando una nuova APK, non dal web.";
+    showInfoToast((typeof LANG !== "undefined" && LANG === "en") ? "Native app" : "App nativa", msg);
+    announce(msg);
+    if (btn) btn.disabled = false;
+    if (label) label.textContent = T("checkBtn");
+    return;
+  }
+
   if (btn) btn.disabled = true;
   if (label) label.innerHTML = '<span class="mini-spinner"></span>';
   swCheckInProgress = true;
