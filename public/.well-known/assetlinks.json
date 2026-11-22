@@ -1,8 +1,0 @@
-[{
-      "relation": ["delegate_permission/common.handle_all_urls"],
-      "target": {
-        "namespace": "android_app",
-        "package_name": "studio.littleelsewhere.soundscript",
-        "sha256_cert_fingerprints": ["7B:ED:95:BB:04:6C:66:BD:97:20:1F:EF:7A:E3:70:0E:40:63:FF:7C:7A:97:E5:57:6D:2D:77:67:AC:C6:EB:AA"]
-      }
-    }]
