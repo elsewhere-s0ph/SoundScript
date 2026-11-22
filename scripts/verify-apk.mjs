@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /* Gate post-build: verifica che l'APK dichiari la consegna della condivisione.
-   android-browser-helper non usa una ShareTargetActivity: espone un
-   <meta-data android:name="android.support.customtabs.trusted.METADATA_SHARE_TARGET">
-   che punta a una risorsa XML. La configurazione (action, method, enctype,
-   params) vive quindi in res/xml/, non nella string pool del manifest.
-   Cercare "ShareTargetActivity" nel manifest produce un falso negativo. */
+   Accetta due architetture:
+   - TWA: meta-data METADATA_SHARE_TARGET di android-browser-helper
+   - Capacitor: intent-filter SEND audio/* sulla MainActivity con BridgeActivity
+   Blocca sempre: chiave privata dentro l'APK, AAB spacciato per APK,
+   estensioni usate come MIME type (INSTALL_PARSE_FAILED_MANIFEST_MALFORMED). */
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { inflateRawSync } from "node:zlib";
@@ -20,14 +20,13 @@ const warn = (m) => { notes.push(m); console.log("  WARN " + m); };
 console.log("== Verifica APK: consegna condivisione ==");
 
 if (!existsSync(join(process.cwd(), APK))) {
-  bad(APK + " non trovato. Esegui bubblewrap build prima di questo controllo.");
+  bad(APK + " non trovato.");
   finish();
 }
 
 const buf = readFileSync(join(process.cwd(), APK));
 ok(APK + " letto · " + (buf.length / 1048576).toFixed(2) + " MB");
 
-/* ---------- ZIP ---------- */
 function zipEntries(b) {
   const out = [];
   if (b.length < 22) return out;
@@ -89,7 +88,6 @@ if (!lower.some((n) => /^meta-inf\/.*\.(rsa|dsa|ec)$/.test(n))) {
 }
 if (names.indexOf("AndroidManifest.xml") < 0) { bad("AndroidManifest.xml assente"); finish(); }
 
-/* ---------- AXML string pool ---------- */
 function stringPool(b) {
   if (b.length < 16) throw new Error("buffer troppo corto");
   if (b.readUInt16LE(0) !== 0x0003) throw new Error("non è AXML");
@@ -136,14 +134,10 @@ function stringPool(b) {
   }
   return out.filter(Boolean);
 }
-
-/* estrae stringhe leggibili da un buffer arbitrario (risorse, arsc) */
 function rawStrings(b) {
   const out = [];
   const seen = new Set();
-  const push = (s) => {
-    if (s.length >= 3 && /^[\x20-\x7E]+$/.test(s) && !seen.has(s)) { seen.add(s); out.push(s); }
-  };
+  const push = (s) => { if (s.length >= 3 && /^[\x20-\x7E]+$/.test(s) && !seen.has(s)) { seen.add(s); out.push(s); } };
   let cur = "";
   for (let i = 0; i < b.length; i++) {
     const c = b[i];
@@ -163,7 +157,7 @@ function stringsOf(b) {
   try {
     const p = stringPool(b);
     if (p.length > 2) return p;
-  } catch (e) { /* non è AXML: fallback */ }
+  } catch (e) { /* non AXML */ }
   return rawStrings(b);
 }
 
@@ -181,103 +175,51 @@ try {
 const has = (re) => manStrings.some((s) => re.test(s));
 const find = (re) => manStrings.filter((s) => re.test(s));
 
-/* ---------- 1 · registrazione nel menu Condividi ---------- */
+/* 1 · registrazione nel menu Condividi */
 const send = has(/android\.intent\.action\.SEND$/i);
-const sendMulti = has(/android\.intent\.action\.SEND_MULTIPLE$/i);
 const audioMime = find(/^audio\//i);
 const anyMime = find(/^[a-z][a-z0-9!#$&^_.+-]*\/[a-z0-9!#$&^_.+*-]+$/i).filter((m) => !/^android\./i.test(m));
-
 send ? ok("ACTION_SEND presente") : bad("ACTION_SEND assente: l'app non compare nel menu Condividi");
-sendMulti ? ok("SEND_MULTIPLE presente") : warn("SEND_MULTIPLE assente: sufficiente SEND per un vocale");
-audioMime.length
-  ? ok("mime audio: " + audioMime.join(", "))
+audioMime.length ? ok("mime audio: " + audioMime.join(", "))
   : bad("nessun mime audio (trovati: " + (anyMime.join(", ") || "nessuno") + ")");
 
-/* ---------- 1bis · nessun MIME type malformed ---------- */
-/* Bubblewrap copia ogni voce di accept in android:mimeType. Un'estensione
-   (.ogg, .mp3…) non è un MIME type e Android rifiuta l'installazione con
-   INSTALL_PARSE_FAILED_MANIFEST_MALFORMED prima ancora di aprire l'app. */
-const malformedMime = manStrings.filter((s) => /^\.[A-Za-z0-9]{1,8}$/.test(s));
-if (malformedMime.length) {
-  bad("MIME type malformati nel manifest Android: " + malformedMime.join(", ") +
-      " · sono estensioni finite in accept: usa solo audio/* e audio/<sottotipo>");
+/* 1bis · nessuna estensione usata come MIME type */
+const malformed = manStrings.filter((s) => /^\.[A-Za-z0-9]{1,8}$/.test(s));
+if (malformed.length) {
+  bad("MIME type malformati: " + malformed.join(", ") + " · Android rifiuta l'installazione");
 } else {
   ok("nessuna estensione usata come MIME type");
 }
 
-/* ---------- 2 · il meccanismo di consegna ---------- */
-/* android-browser-helper: meta-data METADATA_SHARE_TARGET sul LauncherActivity,
-   che punta a una risorsa XML. Non esiste una ShareTargetActivity. */
+/* 2 · meccanismo di consegna: TWA oppure Capacitor */
 const metaShare = find(/METADATA_SHARE_TARGET/i);
+const shareString = find(/share-?target/i);
+const capacitor = find(/BridgeActivity|com\.getcapacitor/i);
 const delegation = find(/DelegationService/i);
-const shareStringInManifest = find(/share-?target/i);
 
-if (metaShare.length) {
-  ok("meta-data di consegna: " + metaShare.join(", "));
-} else if (shareStringInManifest.length) {
-  ok("destinazione dichiarata nel manifest: " + shareStringInManifest.join(", "));
+if (capacitor.length) {
+  ok("pacchetto Capacitor: WebView nativa, intent letto in-process");
+} else if (metaShare.length || shareString.length) {
+  ok("pacchetto TWA: meta-data di consegna presente");
 } else {
-  bad("nessun meta-data METADATA_SHARE_TARGET né stringa share-target: il pacchetto non dichiara la consegna");
+  bad("nessun meccanismo di consegna: né Capacitor né meta-data TWA");
 }
-delegation.length
-  ? ok("DelegationService presente: " + delegation.join(", "))
-  : warn("DelegationService non rilevato nel pool");
+if (delegation.length) ok("DelegationService presente (TWA)");
 
-/* ---------- 3 · la configurazione nelle risorse ---------- */
-/* action URL, method, enctype e params vivono in res/xml/, non nel manifest.
-   Le cerchiamo lì. Se non le troviamo, è un avviso: il formato delle risorse
-   può variare con resource shrinking, e non è motivo per bloccare. */
-const resEntries = entries.filter((e) =>
-  /^res\/.*\.xml$/i.test(e.name) || /^resources\.arsc$/i.test(e.name)
-);
-console.log("\n── risorse esaminate: " + resEntries.length + " ──");
-const cfgHits = { action: [], method: [], enctype: [], field: [] };
-let resScanned = 0;
-for (const e of resEntries) {
-  let strs = [];
-  try {
-    const rb = entryBuffer(buf, e);
-    strs = stringsOf(rb);
-    resScanned++;
-  } catch (err) { continue; }
-  strs.forEach((s) => {
-    if (/share-?target/i.test(s)) cfgHits.action.push(e.name + " → " + s);
-    if (/^POST$/i.test(s)) cfgHits.method.push(e.name + " → " + s);
-    if (/multipart\/form-data/i.test(s)) cfgHits.enctype.push(e.name + " → " + s);
-    if (/^audio$/i.test(s)) cfgHits.field.push(e.name + " → " + s);
-  });
-}
-console.log("  risorse decodificate: " + resScanned + "/" + resEntries.length);
+/* 3 · bundle web dentro l'APK (modalità bundled) */
+const hasBundle = names.some((n) => n.startsWith("assets/public/"));
+hasBundle ? ok("bundle web impacchettato in assets/public")
+  : warn("nessun assets/public: verifica webDir in capacitor.config.json");
 
-const cfgFound = [];
-if (cfgHits.action.length) { ok("action di consegna: " + cfgHits.action[0]); cfgFound.push("action"); }
-if (cfgHits.method.length) { ok("method POST: " + cfgHits.method[0]); cfgFound.push("method"); }
-if (cfgHits.enctype.length) { ok("enctype multipart: " + cfgHits.enctype[0]); cfgFound.push("enctype"); }
-if (cfgHits.field.length) { ok("campo file 'audio': " + cfgHits.field[0]); cfgFound.push("field"); }
-
-if (!cfgFound.length) {
-  warn("configurazione dello share target non leggibile nelle risorse: possibile offuscamento dei nomi");
-  console.log("  Le prime risorse XML nell'APK:");
-  resEntries.slice(0, 12).forEach((e) => console.log("    · " + e.name));
-} else if (cfgFound.length < 4) {
-  warn("configurazione parziale (" + cfgFound.join(", ") + "): le altre voci possono essere in risorse non decodificabili");
-}
-
-/* ---------- 4 · verdetto ---------- */
-const declared = send && audioMime.length > 0 && (metaShare.length > 0 || shareStringInManifest.length > 0);
+/* 4 · verdetto */
+const declared = send && audioMime.length > 0 && (capacitor.length > 0 || metaShare.length > 0 || shareString.length > 0);
 console.log("");
 if (declared) {
   ok("VERDETTO: il pacchetto dichiara la consegna della condivisione audio");
-  if (cfgFound.length >= 2) {
-    ok("configurazione confermata nelle risorse: " + cfgFound.join(", "));
-  } else {
-    console.log("  La prova finale è sul dispositivo: installa l'APK, condividi un vocale");
-    console.log("  da WhatsApp e verifica che la trascrizione parta.");
-  }
 } else {
-  bad("VERDETTO: il pacchetto non dichiara la consegna. Controlla shareTarget in twa-manifest.json.");
-  console.log("\nStringhe rilevanti nel manifest:");
-  manStrings.filter((s) => /intent|audio|share|browserhelper|Delegation|Launcher/i.test(s))
+  bad("VERDETTO: dichiarazione di consegna incompleta");
+  console.log("Stringhe rilevanti:");
+  manStrings.filter((s) => /intent|audio|share|capacitor|Bridge|Main/i.test(s))
     .forEach((s) => console.log("  · " + s));
 }
 
