@@ -15,7 +15,7 @@ env:
 
 jobs:
   bootstrap:
-    name: Genera e commita il progetto Android
+    name: Genera o aggiorna il progetto Android
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -33,8 +33,24 @@ jobs:
       - name: Build web
         run: npm run build
 
-      - name: Crea la piattaforma Android
-        run: CI=true npx cap add android
+      - name: Crea la piattaforma Android (solo se assente)
+        run: |
+          if [ -d android ]; then
+            echo "android/ già presente: salto cap add, aggiorno i file nativi."
+          else
+            CI=true npx cap add android
+          fi
+
+      - name: Rimuovi opzioni deprecate dalla config
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = 'capacitor.config.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            delete c.bundledWebRuntime;
+            fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+            console.log('config pulita.');
+          "
 
       - name: Scrivi i file nativi personalizzati
         run: |
@@ -260,22 +276,22 @@ jobs:
               logger.info("google-services.json not found")
           }
           GRADLE_EOF
-          
+
           echo "File nativi scritti."
           ls -1 "$JDIR"
 
       - name: Sincronizza il bundle web
         run: npx cap sync android
 
-      - name: Commit del progetto Android
+      - name: Commit del progetto Android e della config
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add android
+          git add android capacitor.config.json
           if git diff --cached --quiet; then
             echo "Niente da commitare."
           else
-            git commit -m "chore(android): bootstrap progetto nativo Capacitor"
+            git commit -m "chore(android): bootstrap/aggiorna progetto nativo Capacitor"
             git push origin HEAD:main
-            echo "Progetto Android commitato su main."
+            echo "Progetto Android e config commitati su main."
           fi
