@@ -1,0 +1,38 @@
+name: cleanup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  remove-twa:
+    name: Rimuovi i file TWA/Bubblewrap obsoleti
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rimuovi i percorsi morti
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for p in \
+            ".github/workflows/android.yml" \
+            "twa-manifest.json" \
+            "public/.well-known/assetlinks.json" \
+            ".github/workflows/twa.yml" \
+            "scripts/check-twa.mjs" \
+            "docs/TWA.md" \
+            "docs/ANDROID-SHARE.md" \
+            "docs/ANDROID.md" ; do
+            git rm -f --ignore-unmatch "$p" || true
+          done
+          if git diff --cached --quiet; then
+            echo "Niente da rimuovere."
+          else
+            git commit -m "chore: rimuovi il cantiere TWA/Bubblewrap (sostituito da Capacitor)"
+            git push origin HEAD:main
+          fi
