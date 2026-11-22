@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   bump:
-    name: Bumpa versione e crea il tag
+    name: Bumpa versione, tag e release bozza con changelog
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -56,6 +56,52 @@ jobs:
         env:
           KIND: ${{ inputs.kind }}
 
+      - name: Genera changelog dai commit
+        run: |
+          PREV=$(git tag --sort=-v:refname | head -1 || true)
+          echo "Release precedente: ${PREV:-nessuna}"
+          cat > changelog-gen.mjs <<'GEN_EOF'
+          import { execSync } from "node:child_process";
+          import { writeFileSync } from "node:fs";
+          const prev = process.argv[2] || "";
+          const range = prev ? `${prev}..HEAD` : "HEAD";
+          let raw = "";
+          try { raw = execSync(`git log ${range} --pretty=%s`, { encoding: "utf8" }); } catch (e) { raw = ""; }
+          const lines = raw.split("\n").map(s => s.trim()).filter(Boolean)
+            .filter(s => !/^chore:\s*release/i.test(s))
+            .filter(s => !/^Merge /i.test(s));
+          const groups = { feat: [], fix: [], perf: [], refactor: [], docs: [], test: [], build: [], ci: [], chore: [], other: [] };
+          for (const s of lines) {
+            const m = s.match(/^(\w+)(\(.+\))?!?:\s*(.+)$/);
+            if (!m) { groups.other.push(s); continue; }
+            const t = m[1].toLowerCase();
+            (groups[t] ? groups[t] : groups.other).push(m[3]);
+          }
+          const LABEL = {
+            en: { feat: "Features", fix: "Fixes", perf: "Performance", refactor: "Refactoring", docs: "Docs", test: "Tests", build: "Build", ci: "CI", chore: "Maintenance", other: "Other" },
+            it: { feat: "Nuove funzionalità", fix: "Correzioni", perf: "Prestazioni", refactor: "Refactoring", docs: "Documentazione", test: "Test", build: "Build", ci: "CI", chore: "Manutenzione", other: "Altro" }
+          };
+          function section(lang) {
+            const L = LABEL[lang];
+            let out = "";
+            for (const k of Object.keys(L)) {
+              if (!groups[k].length) continue;
+              out += `### ${L[k]}\n`;
+              for (const msg of groups[k]) out += `- ${msg}\n`;
+              out += "\n";
+            }
+            return out || "- (nessun commit rilevato)\n\n";
+          }
+          const body =
+            `<!-- BOZZA GENERATA DAI COMMIT. Rileggi, rifinisci e traduci dove serve, poi cancella questo commento. -->\n` +
+            `## 🇬🇧 English\n\n` + section("en") +
+            `---\n\n` +
+            `## 🇮🇹 Italiano\n\n` + section("it");
+          writeFileSync("release_body.md", body);
+          console.log(body);
+          GEN_EOF
+          node changelog-gen.mjs "$PREV"
+
       - name: Commit e tag
         run: |
           NEW="${{ steps.ver.outputs.new }}"
@@ -68,8 +114,17 @@ jobs:
           git push origin "v${NEW}"
           echo "Creato tag v${NEW}"
 
+      - name: Apri release bozza con changelog
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.new }}
+          name: SoundScript v${{ steps.ver.outputs.new }}
+          draft: true
+          prerelease: false
+          body_path: release_body.md
+
       - name: Riepilogo
         run: |
-          echo "Nuova versione: ${{ steps.ver.outputs.new }}"
-          echo "Tag pushato: v${{ steps.ver.outputs.new }}"
-          echo "Ora crea la Release da questo tag e incolla il changelog."
+          echo "Versione: ${{ steps.ver.outputs.new }}"
+          echo "Tag: v${{ steps.ver.outputs.new }}"
+          echo "Release bozza con changelog precompilato: aprila, rifinisci, pubblica."
