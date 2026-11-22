@@ -11,6 +11,7 @@ on:
       - "index.html"
       - "package.json"
       - "capacitor.config.json"
+      - "scripts/**"
 
 permissions:
   contents: read
@@ -33,7 +34,7 @@ jobs:
 
       - name: Verifica che il progetto Android esista
         run: |
-          test -d android || { echo "::error::cartella android/ assente: lancia prima il workflow android-init"; exit 1; }
+          test -d android || { echo "::error::cartella android/ assente: lancia prima android-init"; exit 1; }
           test -f android/app/build.gradle || { echo "::error::android/app/build.gradle assente"; exit 1; }
 
       - name: Node 20
@@ -77,6 +78,9 @@ jobs:
 
       - name: Sync Capacitor
         run: npx cap sync android
+
+      - name: Genera icone Android
+        run: node scripts/gen-android-icons.mjs
 
       - name: Ricostruisci il keystore
         env:
