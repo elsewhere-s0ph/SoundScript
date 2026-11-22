@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SoundScript</string>
+    <string name="title_activity_main">SoundScript</string>
+    <string name="package_name">studio.littleelsewhere.soundscript</string>
+    <string name="custom_url_scheme">studio.littleelsewhere.soundscript</string>
+</resources>
