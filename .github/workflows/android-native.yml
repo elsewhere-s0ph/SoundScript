@@ -1,0 +1,142 @@
+name: android-native
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "src/**"
+      - "public/**"
+      - "index.html"
+      - "package.json"
+      - "capacitor.config.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-native-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_VERSION_NAME: "1.6.0"
+
+jobs:
+  build:
+    name: APK bundled firmato
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verifica che il progetto Android esista
+        run: |
+          test -d android || { echo "::error::cartella android/ assente: lancia prima il workflow android-init"; exit 1; }
+          test -f android/app/build.gradle || { echo "::error::android/app/build.gradle assente"; exit 1; }
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+
+      - name: Accetta le licenze SDK
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          CT="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$CT" ] || CT=$(ls -1 "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+          yes 2>/dev/null | "$CT" --sdk_root="$SDK" --licenses >/dev/null 2>&1 || true
+          echo "Licenze accettate."
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/build.gradle', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Installa dipendenze web
+        run: npm install --no-audit --no-fund --ignore-scripts
+
+      - name: Build web
+        run: npm run build
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Ricostruisci il keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -u
+          CLEAN=$(printf '%s' "$KS_B64" | tr -d '[:space:]')
+          printf '%s' "$CLEAN" | base64 -d > android/release.keystore
+          chmod 600 android/release.keystore
+          OPENED=""
+          for T in PKCS12 JKS JCEKS; do
+            if keytool -list -keystore android/release.keystore -storetype "$T" -storepass "$KS_PASS" >/dev/null 2>/tmp/kterr; then
+              OPENED="$T"; break
+            fi
+          done
+          [ -n "$OPENED" ] || { echo "::error::keystore non apribile"; head -8 /tmp/kterr; exit 1; }
+          ALIAS=$(keytool -list -keystore android/release.keystore -storetype "$OPENED" -storepass "$KS_PASS" 2>/dev/null \
+            | grep -i 'PrivateKeyEntry' | head -1 | awk -F',' '{print $1}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          [ -n "$ALIAS" ] || { echo "::error::nessuna PrivateKeyEntry"; exit 1; }
+          echo "KS_PATH=$GITHUB_WORKSPACE/android/release.keystore" >> "$GITHUB_ENV"
+          echo "KS_STORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+          echo "KS_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "KS_KEY_ALIAS=$ALIAS" >> "$GITHUB_ENV"
+          echo "Keystore pronto · alias $ALIAS · tipo $OPENED"
+
+      - name: Build APK e AAB
+        env:
+          APP_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
+          ls -1 app/build/outputs/apk/release/ app/build/outputs/bundle/release/
+
+      - name: Prepara i pacchetti
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk out/SoundScript.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab out/SoundScript.aab
+          ls -la out/
+
+      - name: Gate · intento di condivisione
+        run: node scripts/verify-apk.mjs out/SoundScript.apk
+
+      - name: Fingerprint della chiave
+        env:
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          keytool -list -v -keystore android/release.keystore \
+            -alias "$KS_KEY_ALIAS" -storepass "$KS_PASS" | grep -A1 "SHA256:" || true
+
+      - name: Rimuovi il keystore dal workspace
+        if: always()
+        run: shred -u android/release.keystore 2>/dev/null || rm -f android/release.keystore
+
+      - name: Pubblica APK e AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: soundscript-capacitor
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
