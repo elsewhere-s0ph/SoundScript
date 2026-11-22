@@ -2,7 +2,9 @@
    Modulo autonomo: banner di installazione custom, guida iOS "Aggiungi a Home",
    riga "Installa l'app" nelle Info. Non modifica main.js: si aggancia al DOM
    già renderizzato e sopravvive ai re-render (cambio lingua, ecc.).
-   Decisioni: A = ri-mostra dopo 7 giorni · B = pulsante in Info · C = guida iOS. */
+   Decisioni: A = ri-mostra dopo 7 giorni · B = pulsante in Info · C = guida iOS.
+   Patch nativa: in APK Capacitor l'app risulta già installata (nessun pulsante,
+   banner e guida iOS disattivati). Il web resta invariato. */
 
 import "./install.css";
 
@@ -30,6 +32,8 @@ const STR = {
     infoBtnIos: "Come si installa",
     infoInstalled: "App installata",
     infoInstalledDesc: "SoundScript gira come app su questo dispositivo.",
+    infoNativeDesc: "Versione nativa Android. Gli aggiornamenti si installano con una nuova APK.",
+    infoNativeBadge: "Nativa",
     iosTitle: "Aggiungi SoundScript alla Home",
     iosLead: "Su iPhone e iPad l'installazione passa da Safari:",
     iosStep1: "Tocca <b>Condividi</b> nella barra di Safari",
@@ -56,6 +60,8 @@ const STR = {
     infoBtnIos: "How to install",
     infoInstalled: "App installed",
     infoInstalledDesc: "SoundScript is running as an app on this device.",
+    infoNativeDesc: "Native Android build. Updates arrive by installing a newer APK.",
+    infoNativeBadge: "Native",
     iosTitle: "Add SoundScript to your Home Screen",
     iosLead: "On iPhone and iPad, installation goes through Safari:",
     iosStep1: "Tap <b>Share</b> in the Safari toolbar",
@@ -83,9 +89,18 @@ function T(key) {
 const IS_IOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
   (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
+/* APK Capacitor: WebView nativa, non PWA. Letto live perché il bridge
+   può comparire dopo il primo load dei moduli. */
+function isNativeCapacitor() {
+  try {
+    return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  } catch (e) { return false; }
+}
+
 const standaloneQuery = window.matchMedia("(display-mode: standalone)");
 function isInstalled() {
-  return standaloneQuery.matches ||
+  return isNativeCapacitor() ||
+    standaloneQuery.matches ||
     navigator.standalone === true ||
     String(document.referrer || "").startsWith("android-app://");
 }
@@ -188,7 +203,7 @@ function applyBannerTexts() {
 }
 
 function showBanner() {
-  if (installed) return;
+  if (installed || isNativeCapacitor()) return;
   const el = buildBanner();
   clearTimeout(hideTimer);
   el.hidden = false;
@@ -264,7 +279,7 @@ function applyGuideTexts() {
 }
 
 function showGuide() {
-  if (installed) return;
+  if (installed || isNativeCapacitor()) return;
   hideBanner();
   const el = buildGuide();
   clearTimeout(guideHideTimer);
@@ -289,7 +304,7 @@ function dismissGuide(remember) {
 
 /* ---------- azione di installazione ---------- */
 async function doInstall() {
-  if (installed) return;
+  if (installed || isNativeCapacitor()) return;
   if (IS_IOS) { showGuide(); return; }
   if (!deferredPrompt) {
     hideBanner();
@@ -333,6 +348,7 @@ function refreshInfoRow() {
   }
 
   if (installed) {
+    const native = isNativeCapacitor();
     row.className = "settings-item";
     row.innerHTML =
       '<div>' +
@@ -340,9 +356,9 @@ function refreshInfoRow() {
         '<div class="settings-item-desc"></div>' +
       '</div>' +
       '<span class="hbadge ok"><span class="dot"></span><span class="ss-row-badge"></span></span>';
-    row.querySelector(".settings-item-title").textContent = T("infoTitle");
-    row.querySelector(".settings-item-desc").textContent = T("infoInstalledDesc");
-    row.querySelector(".ss-row-badge").textContent = T("infoInstalled");
+    row.querySelector(".settings-item-title").textContent = native ? T("infoInstalled") : T("infoTitle");
+    row.querySelector(".settings-item-desc").textContent = native ? T("infoNativeDesc") : T("infoInstalledDesc");
+    row.querySelector(".ss-row-badge").textContent = native ? T("infoNativeBadge") : T("infoInstalled");
     return;
   }
 
@@ -384,6 +400,12 @@ function watchToast() {
 
 /* ---------- aggancio ai re-render dell'app ---------- */
 function afterRender() {
+  // Il bridge Capacitor può comparire dopo il primo load: rileggi a ogni render.
+  const now = isInstalled();
+  if (now !== installed) {
+    installed = now;
+    if (installed) { hideBanner(); hideGuide(); }
+  }
   applyBannerTexts();
   applyGuideTexts();
   refreshInfoRow();
@@ -447,6 +469,10 @@ function boot() {
   buildGuide();
   afterRender();
   watchApp();
+
+  // Retry brevi: se il bridge nativo compare in ritardo, allinea lo stato.
+  setTimeout(() => { const now = isInstalled(); if (now !== installed) { installed = now; refreshInfoRow(); } }, 300);
+  setTimeout(() => { const now = isInstalled(); if (now !== installed) { installed = now; refreshInfoRow(); } }, 1200);
 
   /* iOS: nessun beforeinstallprompt, mostriamo la guida una volta sola
      (e di nuovo solo dopo 7 giorni dal "Ho capito"). */
