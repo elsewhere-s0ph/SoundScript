@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag della release a cui allegare l'APK (es. v1.7.0)"
+        description: "Tag della release a cui allegare l'APK (es. v1.7.3)"
         required: true
         type: string
 
@@ -31,10 +31,12 @@ jobs:
           test -n "$TAG" || { echo "::error::tag mancante"; exit 1; }
           echo "Release di riferimento: $TAG"
 
-      - name: Checkout del tag
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          # Release pubblicata  -> builda dal tag (codice congelato della release).
+          # Dispatch manuale    -> builda da HEAD (include i fix arrivati dopo il tag).
+          ref: ${{ github.event.release.tag_name || github.ref }}
 
       - name: Deriva versione dal tag
         run: |
