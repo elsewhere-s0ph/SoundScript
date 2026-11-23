@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: FAQ & usage / FAQ e utilizzo
+    url: https://soundscript-home.pages.dev/
+    about: Read the FAQ before opening an issue / Leggi le FAQ prima di aprire una issue
+  - name: Security vulnerability / Vulnerabilità di sicurezza
+    url: https://github.com/elsewhere-s0ph/SoundScript/security/advisories/new
+    about: Report privately, never in a public issue / Segnala in privato, mai in una issue pubblica
