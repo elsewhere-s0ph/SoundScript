@@ -4,13 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       kind:
-        description: "Tipo di incremento"
+        description: "Incremento automatico (ignorato se compili 'version')"
         type: choice
         default: patch
         options:
           - patch   # 1.7.3 -> 1.7.4  (fix, piccole modifiche)
           - minor   # 1.7.3 -> 1.8.0  (nuove funzionalità)
           - major   # 1.7.3 -> 2.0.0  (cambiamenti rompenti)
+      version:
+        description: "Versione manuale, es. 1.8.0 (lascia vuoto per usare 'kind')"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -42,19 +47,39 @@ jobs:
             const fs = require('fs');
             const p = './package.json';
             const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
-            const [M, m, pa] = pkg.version.split('.').map(Number);
-            const kind = process.env.KIND;
+            const [X, Y, Z] = pkg.version.split('.').map(Number);
+            const manual = (process.env.MANUAL || '').trim();
             let next;
-            if (kind === 'major') next = [M + 1, 0, 0];
-            else if (kind === 'minor') next = [M, m + 1, 0];
-            else next = [M, m, pa + 1];
+            let mode;
+            if (manual) {
+              if (!/^\d+\.\d+\.\d+$/.test(manual)) {
+                console.error('::error::versione manuale non valida (atteso X.Y.Z): ' + manual);
+                process.exit(1);
+              }
+              const [a, b, c] = manual.split('.').map(Number);
+              const greater = (a > X) || (a === X && b > Y) || (a === X && b === Y && c > Z);
+              if (!greater) {
+                console.error('::error::la versione manuale ' + manual + ' non è maggiore dell attuale ' + pkg.version);
+                process.exit(1);
+              }
+              next = [a, b, c];
+              mode = 'manuale';
+            } else {
+              const kind = process.env.KIND;
+              if (kind === 'major') next = [X + 1, 0, 0];
+              else if (kind === 'minor') next = [X, Y + 1, 0];
+              else next = [X, Y, Z + 1];
+              mode = 'automatico (' + kind + ')';
+            }
             pkg.version = next.join('.');
             fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
-            console.log('NEW=' + pkg.version);
+            console.log('NEW=' + pkg.version + ' (' + mode + ')');
             fs.appendFileSync(process.env.GITHUB_OUTPUT, 'new=' + pkg.version + '\n');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'mode=' + mode + '\n');
           "
         env:
           KIND: ${{ inputs.kind }}
+          MANUAL: ${{ inputs.version }}
 
       - name: Genera changelog dai commit
         run: |
@@ -125,6 +150,6 @@ jobs:
 
       - name: Riepilogo
         run: |
-          echo "Versione: ${{ steps.ver.outputs.new }}"
+          echo "Versione: ${{ steps.ver.outputs.new }} · modo: ${{ steps.ver.outputs.mode }}"
           echo "Tag: v${{ steps.ver.outputs.new }}"
           echo "Release bozza con changelog precompilato: aprila, rifinisci, pubblica."
