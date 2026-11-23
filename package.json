@@ -15,8 +15,8 @@
     "@huggingface/transformers": "^3.7.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.0",
-    "sharp": "^0.33.5",
-    "vite": "^6.3.5"
+    "@capacitor/cli": "^8.6.2",
+    "sharp": "^0.35.5",
+    "vite": "^8.3.8"
   }
 }
