@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="it" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>SoundScript · Diagnostica condivisione</title>
+<style>
+:root{
+  --bg:#04070e; --bg2:#080e18; --surface:#0d1523; --surface2:#121d2f; --overlay:#18253c;
+  --line:#1e2f49; --line2:#2a3f65;
+  --text:#e4edfb; --dim:#8ba1c5; --dim2:#667ca4;
+  --indigo:#5865f2; --violet:#8b5cf6; --cyan:#22d3ee; --green:#34d399;
+  --amber:#fbbf24; --red:#fb7185; --magenta:#e879f9; --lime:#bef264;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  --rs:8px; --rm:12px; --rl:18px; --rx:26px;
+  --e:cubic-bezier(.16,1,.3,1); --hh:58px;
+}
+:root[data-theme="light"]{
+  --bg:#f1f5fc; --bg2:#e6edf9; --surface:#fff; --surface2:#f1f6fe; --overlay:#fff;
+  --line:#d6e0f2; --line2:#baccea;
+  --text:#07101e; --dim:#42557a; --dim2:#5f7398;
+  --indigo:#4338ca; --violet:#6d28d9; --cyan:#0e7490; --green:#047857;
+  --amber:#a16207; --red:#be123c; --magenta:#a21caf; --lime:#4d7c0f;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{font:400 15px/1.6 var(--sans);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;min-height:100vh;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+   radial-gradient(680px 460px at 2% -12%, color-mix(in srgb,var(--red) 17%,transparent), transparent 66%),
+   radial-gradient(620px 440px at 102% 2%, color-mix(in srgb,var(--cyan) 20%,transparent), transparent 64%),
+   radial-gradient(820px 620px at 48% 114%, color-mix(in srgb,var(--indigo) 20%,transparent), transparent 70%)}
+body::after{content:"";position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.5;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E")}
+:root[data-theme="light"] body::after{opacity:.28}
+.shell{position:relative;z-index:2}
+*{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--cyan) 55%,transparent) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:color-mix(in srgb,var(--text) 6%,transparent)}
+::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--cyan),var(--indigo));border:3px solid transparent;background-clip:padding-box;border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,var(--lime),var(--cyan));background-clip:padding-box}
+
+.head{position:fixed;inset:0 0 auto;height:var(--hh);z-index:60;display:flex;align-items:center;gap:10px;
+  padding:0 clamp(10px,2.2vw,22px);border-bottom:1px solid var(--line);
+  background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px) saturate(1.5)}
+.brand{display:flex;align-items:center;gap:9px;text-decoration:none;color:inherit;flex:none;min-width:0}
+.mark{width:29px;height:29px;border-radius:9px;display:grid;place-items:center;color:#03121a;flex:none;background:linear-gradient(135deg,var(--cyan),var(--indigo));box-shadow:0 6px 18px -8px color-mix(in srgb,var(--cyan) 80%,transparent)}
+.mark svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round}
+.brand b{display:block;font:700 13px/1.1 var(--sans);letter-spacing:-.01em;white-space:nowrap}
+.brand span{font:500 9px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim2);white-space:nowrap}
+.sp{flex:1}
+.ctx{display:flex;align-items:center;gap:6px;flex:none;padding:5px 10px;border:1px solid var(--line2);border-radius:99px;background:var(--surface);font:700 10px/1 var(--mono);color:var(--dim);max-width:44vw;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.ctx b{color:var(--cyan)}
+.ib{width:32px;height:32px;flex:none;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--dim);cursor:pointer;transition:.2s}
+.ib:hover{color:var(--cyan);border-color:var(--line2)}
+.ib.on{color:var(--green);border-color:color-mix(in srgb,var(--green) 45%,transparent)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.ib:focus-visible,.btn:focus-visible,select:focus-visible,input:focus-visible,.tg:focus-within,a:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+
+.wrap{max-width:1300px;margin:0 auto;padding:calc(var(--hh) + 18px) clamp(10px,2.2vw,22px) 80px}
+.hero{border-radius:var(--rx);padding:clamp(16px,2.8vw,28px);border:1px solid var(--line2);position:relative;overflow:hidden;margin-bottom:16px;
+  background:linear-gradient(148deg,color-mix(in srgb,var(--red) 17%,var(--surface)),color-mix(in srgb,var(--indigo) 20%,var(--surface)) 56%,color-mix(in srgb,var(--cyan) 13%,var(--surface)))}
+.hero::after{content:"";position:absolute;width:290px;height:290px;right:-100px;top:-120px;border-radius:50%;pointer-events:none;background:radial-gradient(circle,color-mix(in srgb,var(--cyan) 38%,transparent),transparent 68%)}
+.hero>*{position:relative}
+h1{font:800 clamp(21px,3.4vw,32px)/1.08 var(--sans);letter-spacing:-.032em;margin-bottom:8px}
+h1 em{font-style:normal;background:linear-gradient(96deg,var(--cyan),var(--lime) 50%,var(--magenta));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lede{color:var(--dim);max-width:76ch;font-size:14px}
+h2{font:700 16px/1.25 var(--sans);letter-spacing:-.02em}
+h3{font:600 13px/1.3 var(--sans);margin-bottom:6px}
+.pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:13px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:99px;font:600 10px/1 var(--mono);letter-spacing:.03em;border:1px solid var(--line2);background:color-mix(in srgb,var(--bg) 42%,transparent);color:var(--dim)}
+.pill.ok{color:var(--green);border-color:color-mix(in srgb,var(--green) 42%,transparent);background:color-mix(in srgb,var(--green) 12%,transparent)}
+.pill.warn{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 42%,transparent);background:color-mix(in srgb,var(--amber) 12%,transparent)}
+.pill.bad{color:var(--red);border-color:color-mix(in srgb,var(--red) 42%,transparent);background:color-mix(in srgb,var(--red) 12%,transparent)}
+.pill.cy{color:var(--cyan);border-color:color-mix(in srgb,var(--cyan) 42%,transparent);background:color-mix(in srgb,var(--cyan) 12%,transparent)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.cols{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:1000px){.cols{grid-template-columns:1fr}}
+.panel{position:sticky;top:calc(var(--hh) + 14px);max-height:calc(100vh - var(--hh) - 28px);overflow:auto}
+@media (max-width:1000px){.panel{position:static;max-height:none}}
+.card{background:color-mix(in srgb,var(--surface) 93%,transparent);border:1px solid var(--line);border-radius:var(--rl);padding:14px;position:relative;overflow:hidden}
+.card::before{content:"";position:absolute;inset:0 0 auto;height:1px;background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--cyan) 58%,transparent),transparent)}
+.grp{margin-bottom:13px}
+.grp-t{font:600 9px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;color:var(--dim2);margin-bottom:8px;display:flex;align-items:center;gap:7px}
+.grp-t::after{content:"";flex:1;height:1px;background:var(--line)}
+label.fl{display:block;font:600 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim2);margin:0 0 5px}
+input[type=text],input[type=number],select{width:100%;padding:9px 11px;border-radius:var(--rs);border:1px solid var(--line);background:var(--bg2);color:var(--text);font:400 12px/1.5 var(--mono);transition:.18s}
+input:hover,select:hover{border-color:var(--line2)}
+select{cursor:pointer;appearance:none;padding-right:29px;background-repeat:no-repeat;background-position:right 9px center;background-size:14px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238ba1c5' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E")}
+input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:20px;background:transparent;cursor:pointer;padding:0;border:0}
+input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:99px;background:linear-gradient(90deg,var(--cyan),var(--indigo))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid var(--indigo);margin-top:-5px}
+input[type=range]::-moz-range-track{height:5px;border-radius:99px;background:linear-gradient(90deg,var(--cyan),var(--indigo))}
+input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:#fff;border:2px solid var(--indigo)}
+.field{margin-bottom:9px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.val{font:600 10.5px/1 var(--mono);color:var(--cyan)}
+.tg{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:var(--rs);background:var(--surface2);border:1px solid var(--line);margin-bottom:6px;cursor:pointer}
+.tg.on{border-color:color-mix(in srgb,var(--green) 38%,transparent);background:color-mix(in srgb,var(--green) 8%,var(--surface2))}
+.tg span{font-size:12px;font-weight:500}
+.tg input{position:absolute;opacity:0;pointer-events:none}
+.tr{width:34px;height:19px;flex:none;border-radius:99px;background:color-mix(in srgb,var(--text) 15%,transparent);position:relative;transition:.22s}
+.tr::after{content:"";position:absolute;top:3px;left:3px;width:13px;height:13px;border-radius:50%;background:var(--dim);transition:.22s var(--e)}
+.tg input:checked+.tr{background:linear-gradient(90deg,var(--green),var(--cyan))}
+.tg input:checked+.tr::after{left:18px;background:#fff}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:0 15px;border:1px solid transparent;border-radius:99px;font:600 12.5px/1 var(--sans);cursor:pointer;white-space:nowrap;color:#03121a;background:linear-gradient(135deg,var(--cyan),var(--green));transition:.2s}
+.btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.btn:active{transform:none;scale:.985}
+.btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round}
+.btn.g{background:var(--surface2);border-color:var(--line2);color:var(--text)}
+.btn.g:hover{border-color:var(--cyan);color:var(--cyan);filter:none}
+.btn.v{background:linear-gradient(135deg,var(--indigo),var(--violet));color:#fff}
+.btn.d{background:linear-gradient(135deg,var(--red),var(--magenta));color:#fff}
+.btn.sm{min-height:31px;padding:0 11px;font-size:11.5px}
+.btn.w{width:100%}
+.btn[disabled]{opacity:.42;cursor:not-allowed;transform:none!important;filter:none!important}
+.row{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.sec{margin-bottom:16px;scroll-margin-top:calc(var(--hh) + 14px)}
+.sec-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.sec-n{width:27px;height:27px;flex:none;border-radius:8px;display:grid;place-items:center;font:700 11.5px/1 var(--mono);color:#fff;background:linear-gradient(135deg,var(--indigo),var(--violet))}
+.tel{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+.t{padding:10px 12px;border-radius:var(--rm);background:var(--surface2);border:1px solid var(--line);min-width:0}
+.t b{display:block;font:600 9px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--dim2);margin-bottom:5px}
+.t span{display:block;font:500 12px/1.45 var(--mono);word-break:break-all}
+.t.ok{border-color:color-mix(in srgb,var(--green) 34%,transparent)} .t.ok span{color:var(--green)}
+.t.bad{border-color:color-mix(in srgb,var(--red) 36%,transparent)} .t.bad span{color:var(--red)}
+.t.warn{border-color:color-mix(in srgb,var(--amber) 36%,transparent)} .t.warn span{color:var(--amber)}
+.vres{display:grid;gap:7px}
+.vl{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:var(--rs);background:var(--surface2);border:1px solid var(--line);font-size:12.5px;line-height:1.55}
+.vl i{font-style:normal;font-weight:700;flex:none;width:15px;text-align:center}
+.vl.ok{border-color:color-mix(in srgb,var(--green) 34%,transparent)} .vl.ok i{color:var(--green)}
+.vl.bad{border-color:color-mix(in srgb,var(--red) 36%,transparent)} .vl.bad i{color:var(--red)}
+.vl.warn{border-color:color-mix(in srgb,var(--amber) 36%,transparent)} .vl.warn i{color:var(--amber)}
+.vl b{color:var(--text)}
+.vl code{font-family:var(--mono);font-size:11px;color:var(--dim);word-break:break-all}
+.spin{width:12px;height:12px;border:2px solid color-mix(in srgb,var(--text) 18%,transparent);border-top-color:var(--cyan);border-radius:50%;animation:sp .7s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.hyp{border:1px solid var(--line);border-radius:var(--rm);background:var(--surface2);overflow:hidden;margin-bottom:8px}
+.hyp-h{display:flex;align-items:flex-start;gap:10px;padding:11px 12px}
+.hyp-s{width:22px;height:22px;flex:none;border-radius:6px;display:grid;place-items:center;font:700 10px/1 var(--mono);margin-top:1px}
+.hyp-s.hit{background:color-mix(in srgb,var(--red) 22%,transparent);color:var(--red)}
+.hyp-s.out{background:color-mix(in srgb,var(--green) 20%,transparent);color:var(--green)}
+.hyp-s.unk{background:color-mix(in srgb,var(--text) 11%,transparent);color:var(--dim2)}
+.hyp-t{flex:1;min-width:0}
+.hyp-t b{display:block;font:600 13px/1.35 var(--sans)}
+.hyp-t small{display:block;font-size:11.5px;color:var(--dim);margin-top:2px;line-height:1.5}
+.hyp-fix{padding:0 12px 11px 44px;font-size:12.5px;color:var(--dim);line-height:1.6}
+.hyp-fix code{font-family:var(--mono);font-size:11px;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 11%,transparent);padding:1px 5px;border-radius:4px;word-break:break-all}
+.term{background:#03060c;border:1px solid var(--line);border-radius:var(--rm);overflow:hidden}
+:root[data-theme="light"] .term{background:#0a1120}
+.term-h{display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.03);flex-wrap:wrap}
+.term-h b{font:600 10px/1 var(--mono);color:#7d90b4;letter-spacing:.06em}
+.term-b{padding:12px;font:400 11.5px/1.8 var(--mono);color:#cfe0f7;height:300px;overflow:auto}
+.term-b .ok{color:#34d399} .term-b .bad{color:#fb7185} .term-b .warn{color:#fbbf24}
+.term-b .dim{color:#6a80a8} .term-b .cy{color:#22d3ee} .term-b .hi{color:#e879f9}
+.term-b div{white-space:pre-wrap;word-break:break-word}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:600 9px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--dim2)}
+tr:last-child td{border-bottom:0}
+td.m{font-family:var(--mono);font-size:11px;color:var(--cyan);word-break:break-all}
+.cc{width:32px}
+.mini{width:26px;height:26px;display:grid;place-items:center;border:1px solid var(--line);border-radius:7px;background:var(--surface2);color:var(--dim2);cursor:pointer;transition:.18s}
+.mini:hover{color:var(--red);border-color:var(--red)}
+.mini svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.call{display:flex;gap:10px;padding:12px 14px;border-radius:var(--rm);font-size:12.5px;line-height:1.6;border:1px solid;margin-bottom:11px}
+.call svg{width:17px;height:17px;flex:none;margin-top:2px;fill:none;stroke:currentColor;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.call.bad{background:color-mix(in srgb,var(--red) 11%,transparent);border-color:color-mix(in srgb,var(--red) 40%,transparent);color:color-mix(in srgb,var(--red) 84%,var(--text))}
+.call.warn{background:color-mix(in srgb,var(--amber) 11%,transparent);border-color:color-mix(in srgb,var(--amber) 40%,transparent);color:color-mix(in srgb,var(--amber) 84%,var(--text))}
+.call.cy{background:color-mix(in srgb,var(--cyan) 10%,transparent);border-color:color-mix(in srgb,var(--cyan) 36%,transparent);color:color-mix(in srgb,var(--cyan) 80%,var(--text))}
+.call.ok{background:color-mix(in srgb,var(--green) 10%,transparent);border-color:color-mix(in srgb,var(--green) 36%,transparent);color:color-mix(in srgb,var(--green) 82%,var(--text))}
+.call b{font-weight:700}
+.call code{font-family:var(--mono);font-size:11px;background:color-mix(in srgb,var(--text) 10%,transparent);padding:1px 5px;border-radius:4px}
+.scope{height:56px;border-radius:var(--rs);background:var(--bg2);border:1px solid var(--line);display:block;width:100%;margin-top:8px}
+.foot{margin-top:24px;padding-top:14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--dim2)}
+.foot a{color:var(--cyan);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--cyan) 40%,transparent)}
+.toast{position:fixed;left:50%;bottom:20px;transform:translate(-50%,24px);opacity:0;z-index:90;padding:10px 16px;border-radius:99px;font:600 12.5px/1 var(--sans);pointer-events:none;background:var(--overlay);border:1px solid var(--line2);color:var(--text);box-shadow:0 16px 40px -14px rgba(0,0,0,.6);transition:.3s var(--e);display:flex;align-items:center;gap:8px;max-width:92vw;text-align:center}
+.toast.show{transform:translate(-50%,0);opacity:1}
+.toast svg{width:14px;height:14px;flex:none;fill:none;stroke:var(--green);stroke-width:2.7;stroke-linecap:round;stroke-linejoin:round}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<header class="head">
+  <a class="brand" href="./">
+    <span class="mark"><svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg></span>
+    <span><b>SoundScript</b><span>Share diagnostics</span></span>
+  </a>
+  <div class="sp"></div>
+  <div class="ctx" id="ctxBadge">contesto: <b>—</b></div>
+  <button class="ib on" id="soundBtn" aria-label="Audio del tono di prova"></button>
+  <button class="ib" id="themeBtn" aria-label="Cambia tema"></button>
+</header>
+
+<div class="wrap">
+
+  <div class="hero">
+    <h1>L'audio condiviso <em>arriva o non arriva?</em></h1>
+    <p class="lede">Questa pagina risponde a una sola domanda, e la risposta decide tutto: i byte dell'audio entrano nel livello web, oppure si perdono nel passaggio da Android a Chrome? Il test in basso ricostruisce l'intera catena senza bisogno di WhatsApp, dentro l'APK installato. Poi copia il referto e incollalo in chat.</p>
+    <div class="pills">
+      <span class="pill cy"><span class="dot"></span>stessa origine dell'app</span>
+      <span class="pill cy"><span class="dot"></span>nessun dato inviato</span>
+      <span class="pill warn"><span class="dot"></span>apri qui dentro l'APK, non in Chrome</span>
+    </div>
+  </div>
+
+  <div class="cols">
+
+    <div class="panel card">
+      <div class="grp">
+        <div class="grp-t">Tono di prova</div>
+        <div class="field">
+          <label class="fl" for="fFreq">frequenza · <span class="val" id="vFreq">440 Hz</span></label>
+          <input type="range" id="fFreq" min="80" max="2000" step="10" value="440">
+        </div>
+        <div class="field">
+          <label class="fl" for="fDur">durata · <span class="val" id="vDur">0,6 s</span></label>
+          <input type="range" id="fDur" min="0.2" max="4" step="0.1" value="0.6">
+        </div>
+        <div class="field">
+          <label class="fl" for="fRate">sample rate</label>
+          <select id="fRate">
+            <option value="8000">8000 Hz · minimo</option>
+            <option value="16000" selected>16000 Hz · Whisper</option>
+            <option value="44100">44100 Hz · CD</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="fl" for="fName">nome file</label>
+          <input type="text" id="fName" spellcheck="false" value="diagnostica.wav">
+        </div>
+        <div class="field">
+          <label class="fl" for="fMime">mime dichiarato</label>
+          <select id="fMime">
+            <option value="audio/wav">audio/wav</option>
+            <option value="audio/ogg">audio/ogg · come WhatsApp</option>
+            <option value="audio/mpeg">audio/mpeg</option>
+            <option value="">vuoto · forza il fallback</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="fl" for="fField">nome del campo multipart</label>
+          <select id="fField">
+            <option value="audio">audio · atteso dal worker</option>
+            <option value="file">file · campo sbagliato</option>
+            <option value="shared">shared · campo sbagliato</option>
+          </select>
+        </div>
+        <div class="two">
+          <div class="field"><label class="fl" for="fRepeat">ripetizioni</label><input type="number" id="fRepeat" min="1" max="10" step="1" value="1"></div>
+          <div class="field"><label class="fl" for="fTarget">destinazione</label>
+            <select id="fTarget">
+              <option value="share-target.html">.html</option>
+              <option value="share-target">clean URL</option>
+            </select>
+          </div>
+        </div>
+        <canvas class="scope" id="scope" width="560" height="112" aria-label="Forma d'onda del tono di prova"></canvas>
+      </div>
+
+      <div class="grp">
+        <div class="grp-t">Comportamento</div>
+        <label class="tg" data-k="auto"><span>Test completo automatico</span><input type="checkbox" checked><span class="tr"></span></label>
+        <label class="tg" data-k="keep"><span>Lascia il file in cache</span><input type="checkbox"><span class="tr"></span></label>
+        <label class="tg" data-k="verbose"><span>Log dettagliato</span><input type="checkbox" checked><span class="tr"></span></label>
+        <label class="tg" data-k="remote"><span>Controlli remoti</span><input type="checkbox" checked><span class="tr"></span></label>
+      </div>
+
+      <div class="grp">
+        <div class="grp-t">Azioni</div>
+        <button class="btn w" id="btnRun" style="margin-bottom:7px"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Esegui diagnosi</button>
+        <button class="btn g w sm" id="btnPlay" style="margin-bottom:7px"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>Ascolta il tono</button>
+        <button class="btn g w sm" id="btnCache" style="margin-bottom:7px"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>Rileggi la cache</button>
+        <button class="btn v w sm" id="btnCopy" style="margin-bottom:7px"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copia referto</button>
+        <button class="btn g w sm" id="btnDl"><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Scarica referto</button>
+      </div>
+      <p style="font-size:10px;color:var(--dim2);line-height:1.5">Il test scrive nella cache reale della condivisione. Se trova un audio in attesa, lo preserva e lo ripristina.</p>
+    </div>
+
+    <div>
+      <div id="alerts"></div>
+
+      <div class="sec">
+        <div class="sec-h"><span class="sec-n">1</span><div><h2>Contesto di esecuzione</h2><p style="font-size:12px;color:var(--dim)">Misurato adesso, in questa pagina.</p></div></div>
+        <div class="card"><div class="tel" id="tel"></div></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><span class="sec-n">2</span><div><h2>Come è stata avviata l'app</h2><p style="font-size:12px;color:var(--dim)">Registrato a ogni avvio dell'app. È la prova decisiva: dice se Android ha consegnato qualcosa.</p></div></div>
+        <div class="card">
+          <div class="vres" id="launches"></div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn g sm" id="btnClearLaunch">Azzera storico avvii</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><span class="sec-n">3</span><div><h2>Ipotesi, in ordine</h2><p style="font-size:12px;color:var(--dim)">Si aggiornano con quello che la pagina misura. Confermata, esclusa, o ancora da verificare.</p></div></div>
+        <div id="hyps"></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><span class="sec-n">4</span><div><h2>La catena, passo per passo</h2><p style="font-size:12px;color:var(--dim)">Riproduce quello che fa WhatsApp, ma con un audio generato qui.</p></div></div>
+        <div class="term">
+          <div class="term-h"><b>TRACE</b><div class="sp" style="flex:1"></div><span class="pill" id="runState"><span class="dot"></span>in attesa</span><button class="btn g sm" id="btnClearLog">Pulisci</button></div>
+          <div class="term-b" id="log"><div class="dim">// premi «Esegui diagnosi»</div></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><span class="sec-n">5</span><div><h2>Cache della condivisione</h2><p style="font-size:12px;color:var(--dim)">Contenuto reale di <code style="font-family:var(--mono);color:var(--cyan)">soundscript-share-v1</code>.</p></div></div>
+        <div class="card" style="padding:5px 5px 2px"><table id="cacheTable"><tbody></tbody></table></div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn d sm" id="btnPurge"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>Svuota la cache condivisione</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><span class="sec-n">6</span><div><h2>Configurazione pubblicata</h2><p style="font-size:12px;color:var(--dim)">Manifest, service worker e associazione Android, letti dal sito.</p></div></div>
+        <div class="vres" id="remote"><div class="vl"><i>·</i><div>Non ancora letti.</div></div></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><span class="sec-n">7</span><div><h2>Referto</h2><p style="font-size:12px;color:var(--dim)">Tutto quello che serve per capire il guasto, in un blocco solo.</p></div></div>
+        <div class="term">
+          <div class="term-h"><b>REPORT</b><div class="sp" style="flex:1"></div><span class="pill cy" id="repSize">0 B</span></div>
+          <div class="term-b" id="report" style="height:240px"><div class="dim">// il referto si compone da solo</div></div>
+        </div>
+      </div>
+
+      <div class="foot">
+        <span>SoundScript · Little Elsewhere</span>
+        <span><a href="./">← torna all'app</a></span>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="toast" id="toast"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg><span id="toastTxt"></span></div>
+<script src="./share-debug.js" defer></script>
+</body>
+</html>
