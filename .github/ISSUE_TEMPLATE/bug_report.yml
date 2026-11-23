@@ -1,0 +1,77 @@
+name: Bug report / Segnalazione bug
+description: Something isn't working / Qualcosa non funziona
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Fill this in **English or Italian** — pick your language below.
+        Grazie per la segnalazione! Compila in **inglese o italiano** — scegli la lingua qui sotto.
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language / Lingua
+      description: The language you'll write in / La lingua in cui scriverai
+      options:
+        - English
+        - Italiano
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel / Canale
+      options:
+        - Web PWA
+        - Android APK
+        - Both / Entrambi
+        - Not sure / Non so
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / Versione
+      placeholder: "e.g. 1.7.3"
+  - type: input
+    id: device
+    attributes:
+      label: Device & OS / Dispositivo e OS
+      placeholder: "Pixel 9 · Android 16 / desktop Chrome 158"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / Passi per riprodurre
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected / Atteso
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual / Effettivo
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Log (optional / opzionale)
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting / Prima di inviare
+      options:
+        - label: I'm on the latest release / Sono sull'ultima release
+        - label: I read the FAQ / Ho letto le FAQ
