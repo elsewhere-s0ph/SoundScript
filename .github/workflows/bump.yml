@@ -3,8 +3,12 @@ name: bump
 on:
   workflow_dispatch:
     inputs:
+      rebuild:
+        description: "Rigenera l'APK sull'ULTIMA release esistente (niente bump, niente tag, niente bozza)"
+        type: boolean
+        default: false
       kind:
-        description: "Incremento automatico (ignorato se compili 'version')"
+        description: "Incremento automatico (ignorato se compili 'version' o se spunti 'rebuild')"
         type: choice
         default: patch
         options:
@@ -19,14 +23,49 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: bump
   cancel-in-progress: false
 
 jobs:
+  # ---------- modalità rebuild: rilancia release.yml sull'ultimo tag ----------
+  rebuild:
+    name: Rigenera APK sull'ultima release
+    if: ${{ inputs.rebuild }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Trova l'ultimo tag
+        id: tag
+        run: |
+          LAST=$(git tag --sort=-v:refname | head -1 || true)
+          test -n "$LAST" || { echo "::error::nessun tag trovato nel repository"; exit 1; }
+          echo "last=$LAST" >> "$GITHUB_OUTPUT"
+          echo "Ultimo tag: $LAST"
+
+      - name: Lancia release.yml sul tag (codice attuale)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml --ref main -f tag="${{ steps.tag.outputs.last }}"
+          echo "Release.yml lanciata su ${{ steps.tag.outputs.last }} con il codice attuale di main."
+
+      - name: Riepilogo
+        run: |
+          echo "Nessun bump, nessun tag, nessuna bozza: solo rebuild."
+          echo "Segui il run di 'release' per vedere l'APK allegato a ${{ steps.tag.outputs.last }}."
+
+  # ---------- modalità normale: bump + tag + release bozza ----------
   bump:
     name: Bumpa versione, tag e release bozza con changelog
+    if: ${{ !inputs.rebuild }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
