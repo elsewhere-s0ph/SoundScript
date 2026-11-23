@@ -1,0 +1,45 @@
+name: Feature request / Richiesta funzionalità
+description: Suggest an idea / Proponi un'idea
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe your idea in **English or Italian** — pick your language below.
+        Descrivi la tua idea in **inglese o italiano** — scegli la lingua qui sotto.
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language / Lingua
+      options:
+        - English
+        - Italiano
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem it solves / Problema che risolve
+      placeholder: "I'm always frustrated when… / Mi trovo sempre in difficoltà quando…"
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution / Soluzione proposta
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered / Alternative considerate
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel concerned / Canale interessato
+      options:
+        - Web PWA
+        - Android APK
+        - Both / Entrambi
+        - Not sure / Non so
