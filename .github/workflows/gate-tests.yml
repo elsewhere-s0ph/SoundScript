@@ -1,4 +1,5 @@
 name: gate-tests
+description: "Test di regressione del gate verify-apk: accetta gli APK buoni e blocca quelli rotti (senza intent, con estensioni, con chiavi dentro)."
 
 on:
   push:
