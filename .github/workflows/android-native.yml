@@ -1,4 +1,5 @@
 name: android-native
+description: "Compila APK e AAB firmati a ogni push rilevante e li pubblica come artifact CI per i test. Non tocca le Release pubbliche."
 
 on:
   workflow_dispatch:
