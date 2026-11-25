@@ -1,4 +1,5 @@
 name: release
+description: "Alla pubblicazione di una Release (o su richiesta con un tag) compila l'APK, passa il gate e allega APK + checksum alla Release."
 
 on:
   release:
