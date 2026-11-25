@@ -1,4 +1,5 @@
 name: android-init
+description: "Genera o aggiorna il progetto Android nativo (Capacitor) e lo committa su main. Idempotente: rilanciabile senza danni."
 
 on:
   workflow_dispatch:
