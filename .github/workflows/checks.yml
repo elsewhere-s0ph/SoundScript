@@ -1,4 +1,5 @@
 name: checks
+description: "Build web e controlli strutturali + Lighthouse a ogni push o PR. Non pubblica nulla: valida solo che il sito compili e resti accessibile."
 
 on:
   push:
