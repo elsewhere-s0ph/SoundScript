@@ -1,0 +1,52 @@
+/* ===== SoundScript · self-update nativo ===== */
+.nu-overlay{
+  position:fixed; inset:0; z-index:90;
+  display:grid; place-items:center;
+  background:rgba(4,7,15,.6);
+  backdrop-filter:blur(4px);
+  padding:16px;
+}
+.nu-card{
+  width:min(400px,100%);
+  background:var(--sc-lowest,#fff);
+  color:var(--on-surface,#0f172a);
+  border:1px solid var(--outline-variant,#e2e8f0);
+  border-radius:20px;
+  padding:20px;
+  display:grid; gap:12px;
+}
+.nu-row{ display:flex; gap:12px; align-items:flex-start; }
+.nu-ico{
+  width:40px; height:40px; border-radius:12px; flex:none;
+  display:grid; place-items:center; font-size:1.1rem;
+  background:color-mix(in srgb, var(--primary,#4f46e5) 14%, transparent);
+}
+.nu-title{ font-weight:600; font-size:1rem; line-height:1.3; }
+.nu-desc{ font-size:.85rem; color:var(--on-surface-variant,#64748b); line-height:1.5; }
+.nu-ver{ display:flex; gap:.5rem; align-items:center; font-size:.85rem; }
+.nu-old{ opacity:.6; text-decoration:line-through; }
+.nu-new{ color:#047857; font-weight:700; }
+.nu-badge{
+  justify-self:start;
+  background:rgba(16,185,129,.16); color:#047857;
+  font-size:.68rem; font-weight:700; letter-spacing:.05em;
+  padding:.2rem .55rem; border-radius:6px;
+}
+.nu-bar{
+  height:8px; border-radius:99px; overflow:hidden;
+  background:color-mix(in srgb, var(--on-surface,#0f172a) 12%, transparent);
+}
+.nu-bar i{
+  display:block; height:100%; width:0;
+  background:linear-gradient(90deg, var(--primary,#4f46e5), #06b6d4);
+  transition:width .3s;
+}
+.nu-pct{ font-size:.75rem; text-align:right; color:var(--on-surface-variant,#64748b); }
+.nu-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+.nu-btn{
+  display:inline-flex; align-items:center; justify-content:center;
+  min-height:38px; padding:0 16px; border:0; border-radius:12px;
+  font-weight:600; font-size:.88rem; cursor:pointer; font-family:inherit;
+}
+.nu-btn.primary{ background:var(--primary,#4f46e5); color:#fff; }
+.nu-btn.ghost{ background:transparent; color:var(--on-surface-variant,#64748b); border:1px solid var(--outline-variant,#e2e8f0); }
