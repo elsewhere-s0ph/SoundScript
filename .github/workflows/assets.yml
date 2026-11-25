@@ -1,4 +1,5 @@
 name: assets
+description: "Rigenera l'anteprima social og-1200.png dal banner SVG pulito e la commit-ta. Parte da solo quando modifichi il banner."
 
 on:
   workflow_dispatch:
