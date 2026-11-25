@@ -306,6 +306,7 @@ function showInfoToast(title, desc) {
     <div class="toast-desc">${desc}</div>
   `, false);
 }
+
 async function checkForUpdates() {
   const btn = $("#checkUpdateBtn");
   const label = $("#checkUpdateLabel");
@@ -327,6 +328,32 @@ async function checkForUpdates() {
     if (label) label.textContent = T("checkBtn");
     return;
   }
+
+  if (btn) btn.disabled = true;
+  if (label) label.innerHTML = '<span class="mini-spinner"></span>';
+  swCheckInProgress = true;
+  try {
+    if (!("serviceWorker" in navigator) || !swReg) throw new Error("sw");
+    const before = navigator.serviceWorker.controller;
+    await swReg.update();
+    await sleep(1500);
+    const after = navigator.serviceWorker.controller;
+    if (after && after !== before) {
+      showInfoToast(T("toastNewTitle"), T("toastNewDesc"));
+      announce(T("anNewVer"));
+    } else {
+      showStatusToast("success");
+      announce(T("anUpdated"));
+    }
+  } catch (err) {
+    showStatusToast("warning");
+    announce(T("anUpdateFailed"));
+  } finally {
+    swCheckInProgress = false;
+    if (btn) btn.disabled = false;
+    if (label) label.textContent = T("checkBtn");
+  }
+}
 
   if (btn) btn.disabled = true;
   if (label) label.innerHTML = '<span class="mini-spinner"></span>';
