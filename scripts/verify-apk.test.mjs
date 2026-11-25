@@ -1,7 +1,10 @@
 /* Test di regressione per scripts/verify-apk.mjs.
    Costruisce APK-fixture in memoria (ZIP stored, manifest come testo piano
    che il gate legge via rawStrings) e verifica che il gate accetti i pacchetti
-   buoni e blocchi quelli cattivi. Gira con: node --test scripts/verify-apk.test.mjs */
+   buoni e blocchi quelli cattivi. Gira con: node --test scripts/verify-apk.test.mjs
+   Nota: il gate risolve il percorso con join(cwd, argv[2]); quindi qui lo
+   lanciamo con cwd = cartella fixture e nome RELATIVO, altrimenti join
+   concatenerebbe un percorso assoluto producendo un path inesistente. */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -78,9 +81,10 @@ const SEND = "android.intent.action.SEND";
 const META = "android.support.customtabs.trusted.METADATA_SHARE_TARGET";
 
 function run(entries, name) {
-  const p = join(DIR, name + ".apk");
-  writeFileSync(p, zip(entries));
-  const r = spawnSync(process.execPath, [SCRIPT, p], { encoding: "utf8" });
+  const file = name + ".apk";
+  writeFileSync(join(DIR, file), zip(entries));
+  // cwd = DIR + nome relativo: il join(cwd, argv[2]) del gate risolve corretto.
+  const r = spawnSync(process.execPath, [SCRIPT, file], { encoding: "utf8", cwd: DIR });
   return { status: r.status, out: r.stdout + r.stderr };
 }
 
